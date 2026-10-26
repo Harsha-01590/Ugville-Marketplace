@@ -1,0 +1,130 @@
+# ============================================================================
+#  Dependencies
+# ============================================================================
+node_modules/
+/.pnp
+.pnp.js
+
+# ============================================================================
+#  Secrets & credentials — NEVER commit these
+# ============================================================================
+# All env files are ignored; only the committed template is allowed through.
+.env
+.env.*
+!.env.example
+
+# Any stray credential / key / token file
+*.pem
+*.key
+*.p12
+*.pfx
+*.cer
+*.crt
+auth.json
+credentials.json
+credentials*.json
+secret*.json
+secrets*.json
+*.secret
+*token*.txt
+service-account*.json
+gcp-*.json
+
+# Fixture data files that hold real credentials (kept out of the repo)
+src/fixtures/data/login.data.json
+src/fixtures/data/users.json
+src/fixtures/data/*.local.json
+
+# Playwright saved auth / storage state (session tokens)
+/playwright/.auth/
+**/.auth/
+storageState*.json
+
+# ============================================================================
+#  Playwright / test run artifacts
+# ============================================================================
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+/.last-run.json
+**/.last-run.json
+# Playwright MCP browser snapshot/console dumps (may contain live record data)
+/.playwright-mcp/
+
+# ============================================================================
+#  Allure
+# ============================================================================
+/allure-results/
+/allure-report/
+.allure/
+
+# ============================================================================
+#  Project reports / generated output
+# ============================================================================
+/reports/
+/coverage/
+*.lcov
+
+# ============================================================================
+#  Local working spreadsheets & lock files (not repo artifacts)
+# ============================================================================
+*.xlsx
+*.xls
+.~lock.*#
+~$*
+
+# ============================================================================
+#  Debug / scratch output
+# ============================================================================
+/debug_outputs/
+/explore_screenshots/
+*.log
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+debug_*.log
+
+# ============================================================================
+#  TypeScript / build
+# ============================================================================
+/dist/
+/build/
+*.tsbuildinfo
+
+# ============================================================================
+#  Editor / IDE
+# ============================================================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.bak
+*.orig
+
+# Claude Code — keep shared settings, ignore per-developer local overrides
+.claude/settings.local.json
+.agents/rules/
+
+# ============================================================================
+#  OS files
+# ============================================================================
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ============================================================================
+#  Local backups, scratch scripts & internal fixture records
+# ============================================================================
+/src_backup_*/
+/bdd_backup_*/
+# Scratch script with hardcoded UAT credentials — never commit
+/test.tsx
+# Real UAT Opportunity IDs / account usernames (environment-specific)
+src/fixtures/data/uatOpportunities.json
+# Claude Code runtime state
+.claude/scheduled_tasks.lock

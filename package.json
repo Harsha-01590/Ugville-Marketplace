@@ -1,0 +1,48 @@
+{
+  "name": "ugville-marketplace-automation",
+  "version": "1.0.0",
+  "description": "Ugville Marketplace module — standalone Playwright E2E Test Automation (POM Framework), split out of ugville-automation",
+  "main": "index.js",
+  "scripts": {
+    "test": "npx playwright test",
+    "test:qa": "cross-env ENV=qa npx playwright test",
+    "test:uat": "cross-env ENV=uat npx playwright test",
+    "test:staging": "cross-env ENV=staging npx playwright test",
+    "test:smoke": "npx playwright test --grep @smoke",
+    "test:eligibility": "npx playwright test --grep @ListingEligibilityCriteria",
+    "test:regression": "npx playwright test --grep @regression",
+    "test:cross-browser": "cross-env CROSS_BROWSER=1 npx playwright test --grep @regression",
+    "test:mobile": "cross-env MOBILE=1 npx playwright test",
+    "test:headed": "npx playwright test --headed",
+    "test:debug": "npx playwright test --debug",
+    "test:ui": "npx playwright test --ui",
+    "report": "npx playwright show-report",
+    "report:allure": "allure generate allure-results --clean -o allure-report && allure open allure-report",
+    "report:allure:serve": "allure serve allure-results",
+    "codegen": "npx playwright codegen https://homevestors--qa.sandbox.my.site.com/ugville/login",
+    "codegen:qa": "npx playwright codegen https://homevestors--qa.sandbox.my.site.com/ugville/login"
+  },
+  "keywords": [
+    "playwright",
+    "e2e",
+    "ugville",
+    "salesforce",
+    "pom",
+    "marketplace"
+  ],
+  "author": "TechnoIdentity",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "@playwright/test": "1.61.1",
+    "@types/node": "26.1.1",
+    "allure-commandline": "2.43.0",
+    "allure-playwright": "3.10.2",
+    "cross-env": "10.1.0",
+    "exceljs": "4.4.0",
+    "typescript": "7.0.2"
+  },
+  "dependencies": {
+    "allure": "^3.21.0"
+  }
+}

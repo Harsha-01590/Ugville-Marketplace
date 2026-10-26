@@ -1,0 +1,12 @@
+{
+  "marketplace": {
+    "bidReason": "Deal fits our current buy-box and target area",
+    "stageFilter": "Ad Council",
+    "bidAcceptedStage": "Bid Accepted"
+  },
+  "timeouts": {
+    "navigation": 60000,
+    "settle": 3000,
+    "afterEach": 2000
+  }
+}
