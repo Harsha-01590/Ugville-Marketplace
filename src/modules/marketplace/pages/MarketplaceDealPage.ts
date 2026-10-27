@@ -1,4 +1,4 @@
-import { Page, Locator, expect } from '@playwright/test';
+import type { Page, Locator } from '@playwright/test';
 import { BasePage } from '../../../shared/pages/base/BasePage';
 
 /**
@@ -20,93 +20,26 @@ import { BasePage } from '../../../shared/pages/base/BasePage';
 export type InviteAction = 'Accept' | 'Decline';
 
 export class MarketplaceDealPage extends BasePage {
-  constructor(page: Page) {
-    super(page);
-  }
-
   // ==================== Locators ====================
 
-  get modalHeading() {
-    return this.page.getByRole('heading', { name: 'Marketplace Deal Details' });
-  }
-
-  private get mpdIdText() {
-    // Scoped to the modal: the deal cards behind it carry MPD ids too.
-    return this.dealDialog.getByText(/^MPD-\d+$/).first();
-  }
-
-  private get sourceOpportunityLink() {
-    return this.page.getByRole('link').filter({ hasText: /-\s*(S|B)$/ }).first();
-  }
-
-  private get locationText() {
-    return this.dealDialog.getByText(/^Location:/).first();
-  }
-
-  private get dealTermsText() {
-    return this.page.getByText(/^Deal Terms:/).first();
-  }
-
-  private get opportunityDetailsText() {
-    return this.page.getByText(/^Opportunity Details:/).first();
-  }
-
-  private get estimatedArvText() {
-    return this.dealDialog.getByText(/^Estimated ARV:/).first();
-  }
-
-  private get biddingFranchiseDropdown() {
-    return this.page.getByRole('combobox', { name: 'Bidding Franchise' });
-  }
-
-  readonly bidReasonInput = this.page.getByRole('textbox', { name: /Reason for [Bb]id/ });
-
-  readonly placeBidButton = this.page.getByRole('button', { name: 'Place Bid', exact: true });
-  readonly cancelButton = this.page.getByRole('button', { name: 'Cancel', exact: true });
-  readonly cancelAndCloseButton = this.page.getByRole('button', { name: 'Cancel and close' });
-
-  private get ineligibilityMessage() {
-    return this.page.getByText(/not eligible|ineligib(le|ility)|Opted Out|Do Not Call|no.*associated Franchise/i).first();
-  }
-
-  private get alreadyBidMessage() {
-    return this.page.getByText(/You have already bid/i).first();
-  }
-
-  private get withdrawBidButton() {
-    return this.page.getByRole('button', { name: /withdraw bid/i });
-  }
-
-  private get withdrawDealButton() {
-    return this.page.getByRole('button', { name: /withdraw deal/i });
-  }
-
-  private get acceptBidButtons() {
-    return this.page.getByRole('button', { name: /^accept bid$/i });
-  }
-
-  private get declineBidButtons() {
-    return this.page.getByRole('button', { name: /^decline bid$/i });
-  }
-
-  /** Invited Franchise's two actions on a pending Direct Invite (live-verified QA 2026-10-06). */
-  private inviteButton(action: InviteAction) {
-    return this.page.getByRole('button', { name: `${action} Invite`, exact: true });
-  }
-
+  readonly modalHeading: Locator;
+  private readonly mpdIdText: Locator;
+  private readonly sourceOpportunityLink: Locator;
+  private readonly locationText: Locator;
+  private readonly dealTermsText: Locator;
+  private readonly opportunityDetailsText: Locator;
+  private readonly estimatedArvText: Locator;
+  private readonly biddingFranchiseDropdown: Locator;
+  private readonly ineligibilityMessage: Locator;
+  private readonly alreadyBidMessage: Locator;
+  private readonly withdrawBidButton: Locator;
+  private readonly withdrawDealButton: Locator;
+  private readonly acceptBidButtons: Locator;
+  private readonly declineBidButtons: Locator;
   /** "Confirmation of Invite Acceptance" / "Confirmation of Invite Decline", stacked over the deal modal. */
-  private get inviteConfirmDialog() {
-    return this.page.getByRole('dialog').filter({ hasText: /Confirmation of Invite (Acceptance|Decline)/ });
-  }
-
-  private get dealDialog() {
-    return this.page.getByRole('dialog').filter({ has: this.modalHeading });
-  }
-
-  private get termsOfUseCheckbox() {
-    return this.page.getByRole('checkbox', { name: /terms of use/i });
-  }
-
+  private readonly inviteConfirmDialog: Locator;
+  private readonly dealDialog: Locator;
+  private readonly termsOfUseCheckbox: Locator;
   /**
    * Live-verified 2026-08-21: same SLDS pattern as the deal-type radios in
    * `MarketplaceListingComponent` — the checkbox's styled `<span
@@ -114,22 +47,10 @@ export class MarketplaceDealPage extends BasePage {
    * on the raw input retries forever. Clicking the label text (same
    * accessible name, "Terms of Use (legal text)") is what actually toggles it.
    */
-  private get termsOfUseLabel() {
-    return this.page.locator('label').filter({ hasText: /terms of use/i });
-  }
-
-  private get confirmButton() {
-    return this.page.getByRole('button', { name: /^confirm$/i });
-  }
-
-  private get bidHistorySection() {
-    return this.page.getByText(/bid (history|list|details)/i).first();
-  }
-
-  private get bidListRows() {
-    return this.page.locator('[class*="bid-list"] [class*="row"], [class*="bidList"] [class*="item"]');
-  }
-
+  private readonly termsOfUseLabel: Locator;
+  private readonly confirmButton: Locator;
+  private readonly bidHistorySection: Locator;
+  private readonly bidListRows: Locator;
   /**
    * The spreadsheet's "7 additional fields" (Deal Stage / Listed Date / Opp
    * Transferred / Seller Stage / Last Activity / Purchased / Sold Date).
@@ -143,9 +64,163 @@ export class MarketplaceDealPage extends BasePage {
    * structure as the deal card's fields in MarketplacePage) — the label
    * locator's own textContent never includes the value.
    */
-  private get additionalFieldItems() {
+  private readonly additionalFieldItems: Locator;
+  /** "Confirm to Bid for this Deal" — Deal Terms, Reason for Bid, Terms of Use, Cancel/Confirm (live-verified QA 2026-10-09). */
+  private readonly placeBidConfirmDialog: Locator;
+  /** The Listing Franchise's "Confirmation of Bid Acceptance/Decline" popup, stacked over the deal modal. */
+  private readonly bidDecisionDialog: Locator;
+  readonly bidReasonInput: Locator;
+  readonly placeBidButton: Locator;
+  readonly cancelButton: Locator;
+  readonly cancelAndCloseButton: Locator;
+  /** Options of the most recently opened listbox (the Bidding Franchise dropdown). */
+  private readonly lastListboxOptions: Locator;
+  private readonly firstDropdownOption: Locator;
+  /** Close buttons on every open toast. */
+  private readonly toastCloseButtons: Locator;
+  /** The first toast with real text (not the transient "Loading" one). */
+  private readonly firstToast: Locator;
+  /** A generic "Yes" / "Confirm" button, if a withdraw ever asks to confirm. */
+  private readonly yesOrConfirmButton: Locator;
+  /** The confirm-step "Decline Bid" button (last on the page — the popup's, not the row's). */
+  private readonly declineBidConfirmButton: Locator;
+  /** "Assignment" / "Opportunity" type badge in the deal modal. */
+  private readonly dealTypeBadge: Locator;
+  private readonly placeBidConfirmDialogConfirmButton: Locator;
+  private readonly placeBidConfirmDialogCancelButton: Locator;
+  private readonly bidDecisionDialogButtons: Locator;
+  /** The popup's Confirm (or its own "Accept Bid"). */
+  private readonly bidDecisionConfirmButton: Locator;
+  private readonly bidDecisionCancelButton: Locator;
+  private readonly bidDecisionDeclineButton: Locator;
+  private readonly inviteConfirmDialogConfirmButton: Locator;
+  private readonly inviteConfirmDialogCancelButton: Locator;
+  private readonly inviteConfirmDialogDeclineButton: Locator;
+  /** Link to the source Opportunity, scoped to the deal modal. */
+  private readonly dialogSourceOpportunityLink: Locator;
+  /** "CORP" badge — deals listed from a Lead Type "Corporate" opportunity. */
+  private readonly corpBadge: Locator;
+  private readonly dealStatusBadge: Locator;
+  private readonly propertyInfoSection: Locator;
+  /** Every image in the deal modal (property photo, Google image or placeholder drawing). */
+  private readonly dealDialogImages: Locator;
+
+  constructor(page: Page) {
+    super(page);
+    this.modalHeading = page.getByRole('heading', { name: 'Marketplace Deal Details' });
+    this.dealDialog = page.getByRole('dialog').filter({ has: this.modalHeading });
+    // Scoped to the modal: the deal cards behind it carry MPD ids too.
+    this.mpdIdText = this.dealDialog.getByText(/^MPD-\d+$/).first();
+    this.sourceOpportunityLink = page
+      .getByRole('link')
+      .filter({ hasText: /-\s*(S|B)$/ })
+      .first();
+    this.locationText = this.dealDialog.getByText(/^Location:/).first();
+    this.dealTermsText = page.getByText(/^Deal Terms:/).first();
+    this.opportunityDetailsText = page.getByText(/^Opportunity Details:/).first();
+    this.estimatedArvText = this.dealDialog.getByText(/^Estimated ARV:/).first();
+    this.biddingFranchiseDropdown = page.getByRole('combobox', { name: 'Bidding Franchise' });
+    this.ineligibilityMessage = page
+      .getByText(/not eligible|ineligib(le|ility)|Opted Out|Do Not Call|no.*associated Franchise/i)
+      .first();
+    this.alreadyBidMessage = page.getByText(/You have already bid/i).first();
+    this.withdrawBidButton = page.getByRole('button', { name: /withdraw bid/i });
+    this.withdrawDealButton = page.getByRole('button', { name: /withdraw deal/i });
+    this.acceptBidButtons = page.getByRole('button', { name: /^accept bid$/i });
+    this.declineBidButtons = page.getByRole('button', { name: /^decline bid$/i });
+    this.inviteConfirmDialog = page
+      .getByRole('dialog')
+      .filter({ hasText: /Confirmation of Invite (Acceptance|Decline)/ });
+    this.termsOfUseCheckbox = page.getByRole('checkbox', { name: /terms of use/i });
+    this.termsOfUseLabel = page.locator('label').filter({ hasText: /terms of use/i });
+    this.confirmButton = page.getByRole('button', { name: /^confirm$/i });
+    this.bidHistorySection = page.getByText(/bid (history|list|details)/i).first();
+    this.bidListRows = page.locator('[class*="bid-list"] [class*="row"], [class*="bidList"] [class*="item"]');
     // Scoped to the deal modal: the cards behind it carry their own "Last Activity:" label.
-    return this.dealDialog.getByText(/^(Deal Stage|Listed Date|Opp Transferred|Seller Stage|Last Activity|Purchased|Sold Date):/);
+    this.additionalFieldItems = this.dealDialog.getByText(
+      /^(Deal Stage|Listed Date|Opp Transferred|Seller Stage|Last Activity|Purchased|Sold Date):/,
+    );
+    this.placeBidConfirmDialog = page.getByRole('dialog').filter({ hasText: 'Confirm to Bid for this Deal' });
+    this.bidDecisionDialog = page.getByRole('dialog').filter({ hasText: /Confirmation of Bid|this Bid\?/i });
+    this.bidReasonInput = page.getByRole('textbox', { name: /Reason for [Bb]id/ });
+    this.placeBidButton = page.getByRole('button', { name: 'Place Bid', exact: true });
+    this.cancelButton = page.getByRole('button', { name: 'Cancel', exact: true });
+    this.cancelAndCloseButton = page.getByRole('button', { name: 'Cancel and close' });
+    this.lastListboxOptions = page.getByRole('listbox').last().getByRole('option');
+    this.firstDropdownOption = page.getByRole('option').first();
+    this.toastCloseButtons = page
+      .locator('.slds-notify, [role="alert"], [role="status"]')
+      .getByRole('button', { name: /close/i });
+    this.firstToast = page
+      .locator('.slds-notify, [role="alert"], [role="status"]')
+      .filter({ hasText: /\S/ })
+      .filter({ hasNotText: /^\s*Loading/ })
+      .first();
+    this.yesOrConfirmButton = page.getByRole('button', { name: /yes|confirm/i }).first();
+    this.declineBidConfirmButton = page.getByRole('button', { name: /^decline bid$/i }).last();
+    this.dealTypeBadge = this.dealDialog.getByText(/^(Assignment|Opportunity)$/).first();
+    this.placeBidConfirmDialogConfirmButton = this.placeBidConfirmDialog.getByRole('button', {
+      name: 'Confirm',
+      exact: true,
+    });
+    this.placeBidConfirmDialogCancelButton = this.placeBidConfirmDialog.getByRole('button', {
+      name: 'Cancel',
+      exact: true,
+    });
+    this.bidDecisionDialogButtons = this.bidDecisionDialog.getByRole('button');
+    this.bidDecisionConfirmButton = this.bidDecisionDialog
+      .getByRole('button', { name: /^(confirm|accept bid)$/i })
+      .last();
+    this.bidDecisionCancelButton = this.bidDecisionDialog.getByRole('button', { name: 'Cancel', exact: true });
+    this.bidDecisionDeclineButton = this.bidDecisionDialog.getByRole('button', { name: /^decline bid$/i }).last();
+    this.inviteConfirmDialogConfirmButton = this.inviteConfirmDialog.getByRole('button', {
+      name: 'Confirm',
+      exact: true,
+    });
+    this.inviteConfirmDialogCancelButton = this.inviteConfirmDialog.getByRole('button', {
+      name: 'Cancel',
+      exact: true,
+    });
+    this.inviteConfirmDialogDeclineButton = this.inviteConfirmDialog.getByRole('button', {
+      name: 'Decline Invite',
+      exact: true,
+    });
+    this.dialogSourceOpportunityLink = this.dealDialog
+      .getByRole('link')
+      .filter({ hasText: /-\s*(S|B)$/ })
+      .first();
+    this.corpBadge = this.dealDialog.getByText('CORP', { exact: true });
+    this.dealStatusBadge = page.locator('[class*="status"], [class*="badge"]').first();
+    this.propertyInfoSection = page.locator('[class*="property"]').first();
+    this.dealDialogImages = this.dealDialog.locator('img');
+  }
+
+  /** Invited Franchise's two actions on a pending Direct Invite (live-verified QA 2026-10-06). */
+  private inviteButton(action: InviteAction): Locator {
+    return this.page.getByRole('button', { name: `${action} Invite`, exact: true });
+  }
+
+  /** The Reason for Bid length error (any message naming Reason for Bid and the 1000-character limit). */
+  bidReasonLengthError(): Locator {
+    return this.page
+      .getByText(/Reason for Bid/)
+      .filter({ hasText: /1000/ })
+      .first();
+  }
+
+  /** An option of the open dropdown, by exact name. */
+  private dropdownOption(name: string): Locator {
+    return this.page.getByRole('option', { name, exact: true });
+  }
+
+  /** The parent of a "Label:" span — its value is a trailing text node there, not inside the span. */
+  private labelledValue(label: Locator): Locator {
+    return label.locator('xpath=..');
+  }
+
+  /** The innermost row in the deal modal holding `franchise`'s name and the given bid button. */
+  private bidRowFor(franchise: string, button: Locator): Locator {
+    return this.dealDialog.locator('div, li, tr').filter({ hasText: franchise }).filter({ has: button }).last();
   }
 
   // ==================== Additional Actions ====================
@@ -154,7 +229,7 @@ export class MarketplaceDealPage extends BasePage {
     const count = await this.additionalFieldItems.count();
     const fields: Record<string, string> = {};
     for (let i = 0; i < count; i++) {
-      const text = ((await this.additionalFieldItems.nth(i).locator('xpath=..').textContent()) || '').trim();
+      const text = ((await this.labelledValue(this.additionalFieldItems.nth(i)).textContent()) || '').trim();
       const [label, ...rest] = text.split(':');
       fields[label.trim()] = rest.join(':').trim();
     }
@@ -165,7 +240,7 @@ export class MarketplaceDealPage extends BasePage {
   async getBiddingFranchiseOptions(): Promise<string[]> {
     if (!(await this.biddingFranchiseDropdown.isVisible().catch(() => false))) return [];
     await this.biddingFranchiseDropdown.click();
-    const options = this.page.getByRole('listbox').last().getByRole('option');
+    const options = this.lastListboxOptions;
     await options.first().waitFor({ state: 'visible', timeout: 15000 });
     const names = (await options.allInnerTexts()).map((t) => t.trim());
     await this.page.keyboard.press('Escape');
@@ -205,12 +280,24 @@ export class MarketplaceDealPage extends BasePage {
 
   /** "Location: City, ST ZIP" — the value is a text node beside the label, so the parent is read. */
   async getLocationText(): Promise<string> {
-    return ((await this.locationText.locator('xpath=..').innerText().catch(() => '')) || '').replace(/\s+/g, ' ').trim();
+    return (
+      (await this.labelledValue(this.locationText)
+        .innerText()
+        .catch(() => '')) || ''
+    )
+      .replace(/\s+/g, ' ')
+      .trim();
   }
 
   /** "Estimated ARV: $250,000" / "Estimated ARV: N/A" — value beside the label, like Location. */
   async getEstimatedArvText(): Promise<string> {
-    return ((await this.estimatedArvText.locator('xpath=..').innerText().catch(() => '')) || '').replace(/\s+/g, ' ').trim();
+    return (
+      (await this.labelledValue(this.estimatedArvText)
+        .innerText()
+        .catch(() => '')) || ''
+    )
+      .replace(/\s+/g, ' ')
+      .trim();
   }
 
   /**
@@ -254,16 +341,16 @@ export class MarketplaceDealPage extends BasePage {
     // Already acting as it: re-picking sends no request, so the wait below would just time out.
     if (name && ((await this.biddingFranchiseDropdown.innerText().catch(() => '')) || '').trim() === name) return;
     await this.biddingFranchiseDropdown.click();
-    const option = name
-      ? this.page.getByRole('option', { name, exact: true })
-      : this.page.getByRole('option').first();
+    const option = name ? this.dropdownOption(name) : this.firstDropdownOption;
     await option.waitFor({ state: 'visible', timeout: 15000 });
     // A pick re-fetches that franchise's bid (`existingBidFranchise`); INVITED / Accept-Decline Invite render
     // only after it returns (QA 2026-10-15). Re-picking the current franchise sends nothing, hence the catch.
-    const bidLoaded = this.page.waitForResponse(
-      r => r.url().includes('/apex/execute') && (r.request().postData() ?? '').includes('existingBidFranchise'),
-      { timeout: 10000 },
-    ).catch(() => {});
+    const bidLoaded = this.page
+      .waitForResponse(
+        (r) => r.url().includes('/apex/execute') && (r.request().postData() ?? '').includes('existingBidFranchise'),
+        { timeout: 10000 },
+      )
+      .catch(() => {});
     await option.click();
     await bidLoaded;
     await this.waitForStabilization(1000);
@@ -284,7 +371,7 @@ export class MarketplaceDealPage extends BasePage {
 
   /** "Assignment" / "Opportunity" type badge in the deal modal, or '' when none is shown. */
   async getDealTypeBadge(): Promise<string> {
-    const badge = this.dealDialog.getByText(/^(Assignment|Opportunity)$/).first();
+    const badge = this.dealTypeBadge;
     return (await badge.isVisible().catch(() => false)) ? (await badge.innerText()).trim() : '';
   }
 
@@ -307,11 +394,6 @@ export class MarketplaceDealPage extends BasePage {
 
   // ==================== Place Bid confirmation popup ====================
 
-  /** "Confirm to Bid for this Deal" — Deal Terms, Reason for Bid, Terms of Use, Cancel/Confirm (live-verified QA 2026-10-09). */
-  private get placeBidConfirmDialog() {
-    return this.page.getByRole('dialog').filter({ hasText: 'Confirm to Bid for this Deal' });
-  }
-
   /** Enters the reason, clicks Place Bid and returns the confirmation popup's text (whitespace-collapsed). */
   async openPlaceBidConfirmation(reason: string): Promise<string> {
     await this.enterBidReason(reason);
@@ -320,8 +402,17 @@ export class MarketplaceDealPage extends BasePage {
     return (await this.placeBidConfirmDialog.innerText()).replace(/\s+/g, ' ').trim();
   }
 
+  /**
+   * Raw text of the "Confirm to Bid for this Deal" popup ('' when it isn't open).
+   * Live-verified 2026-08-21: "Are you Sure..." and "Reason for Bid" are sibling
+   * elements inside the popup, so the whole dialog is read, not one line.
+   */
+  async getPlaceBidConfirmationText(): Promise<string> {
+    return (await this.placeBidConfirmDialog.textContent().catch(() => '')) || '';
+  }
+
   async isPlaceBidConfirmEnabled(): Promise<boolean> {
-    return this.placeBidConfirmDialog.getByRole('button', { name: 'Confirm', exact: true }).isEnabled();
+    return this.placeBidConfirmDialogConfirmButton.isEnabled();
   }
 
   /**
@@ -331,12 +422,12 @@ export class MarketplaceDealPage extends BasePage {
    */
   async submitPlaceBidConfirmation() {
     if (!(await this.termsOfUseCheckbox.isChecked().catch(() => true))) await this.termsOfUseLabel.click();
-    await this.placeBidConfirmDialog.getByRole('button', { name: 'Confirm', exact: true }).click();
+    await this.placeBidConfirmDialogConfirmButton.click();
   }
 
   /** Closes the confirmation popup (if still open) without bidding. A rejected bid closes it on its own, so it may vanish mid-click. */
   async cancelPlaceBidConfirmation() {
-    const cancel = this.placeBidConfirmDialog.getByRole('button', { name: 'Cancel', exact: true });
+    const cancel = this.placeBidConfirmDialogCancelButton;
     if (await cancel.isVisible().catch(() => false)) await cancel.click({ timeout: 5000 }).catch(() => {});
     await this.placeBidConfirmDialog.waitFor({ state: 'hidden', timeout: 10000 }).catch(() => {});
   }
@@ -346,25 +437,29 @@ export class MarketplaceDealPage extends BasePage {
    * (the 1001-character Reason for Bid echo), cover the deal modal's buttons.
    */
   async dismissToasts() {
-    const close = this.page.locator('.slds-notify, [role="alert"], [role="status"]').getByRole('button', { name: /close/i });
+    const close = this.toastCloseButtons;
     for (let i = (await close.count()) - 1; i >= 0; i--) {
-      await close.nth(i).click({ timeout: 3000 }).catch(() => {});
+      await close
+        .nth(i)
+        .click({ timeout: 3000 })
+        .catch(() => {});
     }
   }
 
   /** Text of the first toast to appear within `timeout` ('' if none) — success toasts are short-lived, so this polls rather than asserting one string. */
   async waitForToastText(timeout = 15000): Promise<string> {
-    const toast = this.page.locator('.slds-notify, [role="alert"], [role="status"]').filter({ hasText: /\S/ }).filter({ hasNotText: /^\s*Loading/ }).first();
-    if (!(await toast.waitFor({ state: 'visible', timeout }).then(() => true).catch(() => false))) return '';
+    const toast = this.firstToast;
+    if (
+      !(await toast
+        .waitFor({ state: 'visible', timeout })
+        .then(() => true)
+        .catch(() => false))
+    )
+      return '';
     return ((await toast.innerText().catch(() => '')) || '').replace(/\s+/g, ' ').trim();
   }
 
   // ==================== Listing Franchise: Accept / Decline a bid ====================
-
-  /** The Listing Franchise's "Confirmation of Bid Acceptance/Decline" popup, stacked over the deal modal. */
-  private get bidDecisionDialog() {
-    return this.page.getByRole('dialog').filter({ hasText: /Confirmation of Bid|this Bid\?/i });
-  }
 
   /** Clicks Accept/Decline Bid on the `index`-th bid row and returns the popup's text (whitespace-collapsed). */
   async openBidDecision(action: InviteAction, index = 0): Promise<string> {
@@ -374,15 +469,15 @@ export class MarketplaceDealPage extends BasePage {
   }
 
   async getBidDecisionButtonLabels(): Promise<string[]> {
-    return (await this.bidDecisionDialog.getByRole('button').allInnerTexts()).map((t) => t.trim()).filter(Boolean);
+    return (await this.bidDecisionDialogButtons.allInnerTexts()).map((t) => t.trim()).filter(Boolean);
   }
 
   async isBidDecisionConfirmEnabled(): Promise<boolean> {
-    return this.bidDecisionDialog.getByRole('button', { name: /^(confirm|accept bid)$/i }).last().isEnabled();
+    return this.bidDecisionConfirmButton.isEnabled();
   }
 
   async cancelBidDecision() {
-    await this.bidDecisionDialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await this.bidDecisionCancelButton.click();
     await this.bidDecisionDialog.waitFor({ state: 'hidden', timeout: 10000 });
   }
 
@@ -390,9 +485,9 @@ export class MarketplaceDealPage extends BasePage {
   async confirmBidDecision(action: InviteAction) {
     if (action === 'Accept') {
       if (!(await this.termsOfUseCheckbox.isChecked().catch(() => true))) await this.termsOfUseLabel.click();
-      await this.bidDecisionDialog.getByRole('button', { name: /^(confirm|accept bid)$/i }).last().click();
+      await this.bidDecisionConfirmButton.click();
     } else {
-      await this.bidDecisionDialog.getByRole('button', { name: /^decline bid$/i }).last().click();
+      await this.bidDecisionDeclineButton.click();
     }
     await this.bidDecisionDialog.waitFor({ state: 'hidden', timeout: 30000 }).catch(() => {});
     await this.waitForStabilization(2000);
@@ -405,7 +500,7 @@ export class MarketplaceDealPage extends BasePage {
    */
   async withdrawDeal() {
     await this.withdrawDealButton.click();
-    const confirm = this.page.getByRole('button', { name: /yes|confirm/i }).first();
+    const confirm = this.yesOrConfirmButton;
     if (await confirm.isVisible({ timeout: 3000 }).catch(() => false)) await confirm.click();
     await this.waitForStabilization(2000);
   }
@@ -422,7 +517,7 @@ export class MarketplaceDealPage extends BasePage {
 
   async withdrawBid() {
     await this.withdrawBidButton.click();
-    const confirm = this.page.getByRole('button', { name: /yes|confirm/i }).first();
+    const confirm = this.yesOrConfirmButton;
     if (await confirm.isVisible({ timeout: 5000 }).catch(() => false)) {
       await confirm.click();
     }
@@ -434,8 +529,14 @@ export class MarketplaceDealPage extends BasePage {
   /** Same settle-before-read reasoning as `isEligibleToBid()`. */
   async hasInviteActions(): Promise<boolean> {
     await this.waitForStabilization(1500);
-    return (await this.inviteButton('Accept').isVisible().catch(() => false))
-      && (await this.inviteButton('Decline').isVisible().catch(() => false));
+    return (
+      (await this.inviteButton('Accept')
+        .isVisible()
+        .catch(() => false)) &&
+      (await this.inviteButton('Decline')
+        .isVisible()
+        .catch(() => false))
+    );
   }
 
   /** Clicks Accept/Decline Invite and returns the confirmation popup's text. */
@@ -446,7 +547,7 @@ export class MarketplaceDealPage extends BasePage {
   }
 
   async isInviteConfirmEnabled(): Promise<boolean> {
-    return this.inviteConfirmDialog.getByRole('button', { name: 'Confirm', exact: true }).isEnabled();
+    return this.inviteConfirmDialogConfirmButton.isEnabled();
   }
 
   async isTermsOfUseChecked(): Promise<boolean> {
@@ -454,7 +555,7 @@ export class MarketplaceDealPage extends BasePage {
   }
 
   async cancelInviteConfirmation() {
-    await this.inviteConfirmDialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await this.inviteConfirmDialogCancelButton.click();
     await this.inviteConfirmDialog.waitFor({ state: 'hidden', timeout: 10000 });
   }
 
@@ -464,9 +565,9 @@ export class MarketplaceDealPage extends BasePage {
       if (!(await this.isTermsOfUseChecked())) {
         await this.termsOfUseLabel.click({ timeout: 5000 }).catch(() => this.termsOfUseCheckbox.check({ force: true }));
       }
-      await this.inviteConfirmDialog.getByRole('button', { name: 'Confirm', exact: true }).click();
+      await this.inviteConfirmDialogConfirmButton.click();
     } else {
-      await this.inviteConfirmDialog.getByRole('button', { name: 'Decline Invite', exact: true }).click();
+      await this.inviteConfirmDialogDeclineButton.click();
     }
     await this.inviteConfirmDialog.waitFor({ state: 'hidden', timeout: 30000 });
     await this.waitForStabilization(3000);
@@ -479,14 +580,31 @@ export class MarketplaceDealPage extends BasePage {
    * links to its own record (the winner gets a new copy).
    */
   async getSourceOpportunityHref(): Promise<string> {
-    const link = this.dealDialog.getByRole('link').filter({ hasText: /-\s*(S|B)$/ }).first();
+    const link = this.dialogSourceOpportunityLink;
     if (!(await link.isVisible().catch(() => false))) return '';
     return link.evaluate((a) => (a as HTMLAnchorElement).href);
   }
 
+  /** The `href` of the first source-Opportunity link on the page (null when there is none). */
+  async getSourceOpportunityLinkHref(): Promise<string | null> {
+    return this.sourceOpportunityLink.getAttribute('href').catch(() => null);
+  }
+
   /** "CORP" badge — deals listed from a Lead Type "Corporate" opportunity. */
   async hasCorpBadge(): Promise<boolean> {
-    return this.dealDialog.getByText('CORP', { exact: true }).isVisible().catch(() => false);
+    return this.corpBadge.isVisible().catch(() => false);
+  }
+
+  /** The resolved `src` of every image in the deal modal. */
+  async getDealDialogImageSources(): Promise<string[]> {
+    return this.dealDialogImages.evaluateAll((imgs) =>
+      imgs.map((i) => (i as HTMLImageElement).currentSrc || i.getAttribute('src') || ''),
+    );
+  }
+
+  /** Waits (up to `timeout`) for the deal modal to be gone; never throws. */
+  async waitForDealDialogHidden(timeout = 10000) {
+    await this.dealDialog.waitFor({ state: 'hidden', timeout }).catch(() => {});
   }
 
   /** Full text of the open deal modal — bid table rows, won/declined banners, Bid Details. */
@@ -511,7 +629,7 @@ export class MarketplaceDealPage extends BasePage {
   /** Like `openBidDecision`, but on the bid placed by `franchise` — the innermost element holding that name and the button is its row. */
   async openBidDecisionFor(action: InviteAction, franchise: string): Promise<string> {
     const button = action === 'Accept' ? this.acceptBidButtons : this.declineBidButtons;
-    const row = this.dealDialog.locator('div, li, tr').filter({ hasText: franchise }).filter({ has: button }).last();
+    const row = this.bidRowFor(franchise, button);
     await row.locator(button).first().click();
     await this.bidDecisionDialog.waitFor({ state: 'visible', timeout: 15000 });
     return (await this.bidDecisionDialog.innerText()).replace(/\s+/g, ' ').trim();
@@ -528,7 +646,7 @@ export class MarketplaceDealPage extends BasePage {
 
   async declineBidAt(index = 0) {
     await this.declineBidButtons.nth(index).click();
-    const confirm = this.page.getByRole('button', { name: /^decline bid$/i }).last();
+    const confirm = this.declineBidConfirmButton;
     if (await confirm.isVisible({ timeout: 5000 }).catch(() => false)) {
       await confirm.click();
     }
@@ -536,7 +654,7 @@ export class MarketplaceDealPage extends BasePage {
   }
 
   async getDealStatusText(): Promise<string> {
-    const status = this.page.locator('[class*="status"], [class*="badge"]').first();
+    const status = this.dealStatusBadge;
     return ((await status.textContent().catch(() => '')) || '').trim();
   }
 
@@ -547,7 +665,7 @@ export class MarketplaceDealPage extends BasePage {
   }
 
   async getPropertyInfoText(): Promise<string> {
-    const section = this.page.locator('[class*="property"]').first();
+    const section = this.propertyInfoSection;
     return ((await section.textContent().catch(() => '')) || '').trim();
   }
 }

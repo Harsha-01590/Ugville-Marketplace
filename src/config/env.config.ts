@@ -50,6 +50,9 @@ export interface EnvConfig {
   ENV: 'qa' | 'uat' | 'staging';
   BROWSER: 'chrome' | 'firefox' | 'webkit';
   HEADLESS: boolean;
+  // Saved login sessions (.auth/<ENV>/*.json) younger than this are reused by
+  // globalSetup instead of logging in again. Expired ones re-login on demand.
+  AUTH_SESSION_MAX_AGE_MIN: number;
 }
 
 function loadEnvFile(envName: string): Record<string, string> {
@@ -93,13 +96,18 @@ export const envConfig: EnvConfig = {
   MARKETPLACE_FORM_TEST_OPPORTUNITY_LOCATION:
     process.env.MARKETPLACE_FORM_TEST_OPPORTUNITY_LOCATION || fileVars.MARKETPLACE_FORM_TEST_OPPORTUNITY_LOCATION || '',
   MARKETPLACE_ASSIGNMENT_LISTING_OPPORTUNITY_ID:
-    process.env.MARKETPLACE_ASSIGNMENT_LISTING_OPPORTUNITY_ID || fileVars.MARKETPLACE_ASSIGNMENT_LISTING_OPPORTUNITY_ID || '',
+    process.env.MARKETPLACE_ASSIGNMENT_LISTING_OPPORTUNITY_ID ||
+    fileVars.MARKETPLACE_ASSIGNMENT_LISTING_OPPORTUNITY_ID ||
+    '',
   MARKETPLACE_OPPORTUNITY_LISTING_OPPORTUNITY_ID:
-    process.env.MARKETPLACE_OPPORTUNITY_LISTING_OPPORTUNITY_ID || fileVars.MARKETPLACE_OPPORTUNITY_LISTING_OPPORTUNITY_ID || '',
+    process.env.MARKETPLACE_OPPORTUNITY_LISTING_OPPORTUNITY_ID ||
+    fileVars.MARKETPLACE_OPPORTUNITY_LISTING_OPPORTUNITY_ID ||
+    '',
   MARKETPLACE_DIRECT_INVITE_SEARCH_TERM:
     process.env.MARKETPLACE_DIRECT_INVITE_SEARCH_TERM || fileVars.MARKETPLACE_DIRECT_INVITE_SEARCH_TERM || '',
   MP_FAILING_CRITERIA: process.env.MP_FAILING_CRITERIA ?? fileVars.MP_FAILING_CRITERIA ?? '',
   ENV: (process.env.ENV || fileVars.ENV || 'qa') as EnvConfig['ENV'],
   BROWSER: (process.env.BROWSER || fileVars.BROWSER || 'chrome') as EnvConfig['BROWSER'],
   HEADLESS: (process.env.HEADLESS || fileVars.HEADLESS || 'true') === 'true',
+  AUTH_SESSION_MAX_AGE_MIN: Number(process.env.AUTH_SESSION_MAX_AGE_MIN || fileVars.AUTH_SESSION_MAX_AGE_MIN || 60),
 };

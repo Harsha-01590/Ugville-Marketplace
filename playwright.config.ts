@@ -15,8 +15,7 @@ import { envConfig } from './src/config/env.config';
  * mirroring each module by name, with cross-module suites (a11y, api,
  * e2e, visual regression, layout) under src/tests/cross-cutting/.
  *
- * BDD (Gherkin .feature files, playwright-bdd) was removed 2026-10-07; the
- * old features/steps are kept in bdd_backup_20261007/ in case it comes back.
+ * BDD (Gherkin .feature files, playwright-bdd) was removed 2026-10-07.
  *
  * @see https://playwright.dev/docs/test-configuration
  *

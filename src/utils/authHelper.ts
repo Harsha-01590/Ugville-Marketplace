@@ -1,4 +1,4 @@
-import { Page } from '@playwright/test';
+import { type Page } from '@playwright/test';
 import { LoginPage } from '../modules/auth';
 
 /**
@@ -40,8 +40,6 @@ export async function registerSessionRecoveryHandler(
   const loginPage = new LoginPage(page);
   await page.addLocatorHandler(loginPage.usernameInput, async () => {
     await loginPage.login(credentials.username, credentials.password);
-    await page
-      .waitForURL((url) => !url.toString().includes('/login'), { timeout: 60_000 })
-      .catch(() => {});
+    await page.waitForURL((url) => !url.toString().includes('/login'), { timeout: 60_000 }).catch(() => {});
   });
 }

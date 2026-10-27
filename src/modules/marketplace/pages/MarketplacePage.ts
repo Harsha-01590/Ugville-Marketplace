@@ -1,4 +1,4 @@
-import { Page, Locator, expect } from '@playwright/test';
+import { type Page, type Locator, type FrameLocator, expect } from '@playwright/test';
 import { BasePage } from '../../../shared/pages/base/BasePage';
 import { Routes } from '../../../enums/routes.enum';
 import { Logger } from '../../../utils/logger';
@@ -7,10 +7,10 @@ export type DealStatus = 'Available' | 'My Direct Invites' | 'My Listed Deals' |
 export type DealType = 'All' | 'Assignment' | 'Opportunity';
 export type MarketplaceView = 'Grid' | 'List' | 'Map';
 export type MarketplaceStage =
-  | 'All Stages' | 'Lead Queue' | 'Contact' | 'Appointment' | 'Offer' | 'Contract' | 'Buy Closing';
+  'All Stages' | 'Lead Queue' | 'Contact' | 'Appointment' | 'Offer' | 'Contract' | 'Buy Closing';
 /** Sub-filter that only renders once Deal Status = "My Listed Deals" is selected. */
 export type MarketplaceDealStage =
-  | 'All' | 'Pending Bid Review' | 'Direct' | 'Ad Council' | 'Full Network' | 'Bid Accepted';
+  'All' | 'Pending Bid Review' | 'Direct' | 'Ad Council' | 'Full Network' | 'Bid Accepted';
 /** Sub-filter that only renders once Deal Status = "My Bids" is selected. */
 export type MarketplaceBidStage = 'All' | 'In Review' | 'Accepted' | 'Lost';
 
@@ -23,8 +23,213 @@ export type MarketplaceBidStage = 'All' | 'In Review' | 'Accepted' | 'Lost';
  * detail as a modal dialog — see `MarketplaceDealPage`, not a page nav.
  */
 export class MarketplacePage extends BasePage {
+  // ==================== Locators ====================
+
+  /**
+   * First-ever visit to Marketplace for an account gates the entire deal
+   * list behind a one-time "Marketplace Terms & Conditions" consent dialog
+   * (full legal text + an "Agree" button). Live-verified 2026-09-04: once
+   * accepted it never reappears for that account — but a freshly reset QA
+   * sandbox or a new test user hits it again, and with no handling here
+   * every downstream call (getDealCardCount/openDealByIndex/
+   * MarketplaceDealPage.expectLoaded) silently saw an empty/blocked page
+   * and hung for the full 60s timeout instead of failing fast. This is
+   * what caused an 18-test cascade across 5 spec files in one run — dismiss
+   * it defensively before every navigate() so that can't happen again.
+   */
+  private readonly termsAgreeButton: Locator;
+  private readonly searchInput: Locator;
+  /**
+   * Live-verified: this button's accessible name is dynamic — plain
+   * "Filters" with none active, but "Filters (N)" once N filters are
+   * applied — so an exact match on the bare word only ever matches the
+   * zero-filters state.
+   */
+  private readonly filtersButton: Locator;
+  private readonly sortDropdown: Locator;
+  private readonly refreshButton: Locator;
+  private readonly termsAcceptButton: Locator;
+  private readonly emptyStateText: Locator;
+  private readonly filtersPanelHeading: Locator;
+  private readonly savedFilterDropdown: Locator;
+  private readonly dealStatusDropdown: Locator;
+  private readonly dealTypeDropdown: Locator;
+  private readonly zipCodeInput: Locator;
+  private readonly radiusDropdown: Locator;
+  private readonly stateDropdown: Locator;
+  private readonly opportunityStageDropdown: Locator;
+  /** Only rendered when Deal Status = "My Listed Deals". */
+  private readonly dealStageDropdown: Locator;
+  /** Only rendered when Deal Status = "My Bids". */
+  private readonly bidStageDropdown: Locator;
+  private readonly lastActivityDropdown: Locator;
+  private readonly daysInSystemDropdown: Locator;
+  private readonly daysInMarketplaceDropdown: Locator;
+  /** Same dynamic-label behavior as filtersButton above: "Reset" with nothing to reset, "Reset Filters" once filters are active. */
+  private readonly resetFiltersButton: Locator;
+  private readonly applyFiltersButton: Locator;
+  /** Each deal card as a container, keyed off its own "View Deal" button. */
+  private readonly dealCardButtons: Locator;
+  /** "Save Filter" (Filters panel) — pick an existing saved filter to overwrite or Create New, plus the notify checkbox (live-verified QA 2026-10-09). */
+  private readonly saveFilterDialog: Locator;
+  private readonly notifyCheckbox: Locator;
+  /** The embedded map — Salesforce's Lightning Maps component, itself wrapping Google Maps. */
+  private readonly mapFrame: FrameLocator;
+  /**
+   * Every deal marker/pin on the map. Live-verified: markers are real accessible
+   * buttons (not canvas-drawn), aria-labelled e.g. "2 Deals | ZIP 30345" — that
+   * label is also what distinguishes ZIP-grouped clustering (MV_005) and doubles
+   * as the hover-preview content (MV_007), so no separate tooltip locator exists.
+   */
+  private readonly mapMarkers: Locator;
+  private readonly currentLocationMarker: Locator;
+  /** Heading of the deal panel a marker click opens, e.g. "ZIP Code: 75240". */
+  private readonly mapZipPanelHeading: Locator;
+  /**
+   * The deal ID links inside the marker's popup panel (MV_006/MV_008).
+   * Live-verified: the panel renders as a plain `role="table"` with no
+   * `rowheader` cells — the deal IDs are just `MPD-NNNNN` text links, so
+   * matching that pattern directly is more reliable than the ARIA grid
+   * roles the panel doesn't actually use.
+   */
+  private readonly mapPanelDealIds: Locator;
+  /**
+   * The "Marketplace" quick link on Home. Text-matches "Marketplace" alone; a
+   * trailing digit run is the unread-count badge, which renders inline and
+   * would break an exact-text match.
+   */
+  private readonly homeMarketplaceLink: Locator;
+  /** The Sort native select (picked by option label). */
+  private readonly sortSelect: Locator;
+  /** Every option of whichever dropdown is open (page-wide). */
+  private readonly dropdownOptions: Locator;
+  /** The "Limit reached..." message shown once the Zip Code input hits its 5-character cap. */
+  private readonly zipLimitMessage: Locator;
+  /** The Filters panel's own "✕" (distinct from the inline info banner's dismiss). */
+  private readonly filtersCloseButton: Locator;
+  private readonly saveFilterButton: Locator;
+  private readonly saveFilterCancelButton: Locator;
+  /** "Load More" under the 50-card grid page. */
+  private readonly loadMoreButton: Locator;
+  /** Every "Invited" deal-card badge, in card order. */
+  private readonly invitedBadges: Locator;
+  /** The map's iframe element (for visibility and bounding box). */
+  private readonly mapIframe: Locator;
+  private readonly mapZoomOutButton: Locator;
+  /** The Filters button while some filters are applied — its name then reads "Filters (N)". */
+  readonly filtersButtonWithActiveFilters: Locator;
+  /** The Filters button with nothing applied — plain "Filters". */
+  readonly filtersButtonWithNoFilters: Locator;
+  /** The "Active filters:" summary shown above the list while filters are applied. */
+  readonly activeFiltersSummary: Locator;
+
   constructor(page: Page) {
     super(page);
+    this.termsAgreeButton = page.getByRole('button', { name: 'Agree', exact: true });
+    this.searchInput = page.getByPlaceholder('Search by deal name or location...');
+    this.filtersButton = page.getByRole('button', { name: /^Filters(\s\(\d+\))?$/ });
+    this.sortDropdown = page.locator('select, combobox').filter({ hasText: /Sort:/ }).first();
+    this.refreshButton = page.getByRole('button', { name: 'Refresh', exact: true });
+    this.termsAcceptButton = page.getByRole('button', { name: /accept/i }).first();
+    this.emptyStateText = page.getByText(/No (Marketplace )?deals? found/i).first();
+    this.filtersPanelHeading = page.getByRole('heading', { name: 'Filters', exact: true });
+    this.savedFilterDropdown = page.getByRole('combobox', { name: 'Saved Filter' });
+    this.dealStatusDropdown = page.getByRole('combobox', { name: 'Deal Status' });
+    this.dealTypeDropdown = page.getByRole('combobox', { name: 'Deal Type' });
+    this.zipCodeInput = page.getByPlaceholder('Zip Code');
+    this.radiusDropdown = page.getByRole('combobox', { name: 'Radius' });
+    this.stateDropdown = page.getByRole('combobox', { name: 'State' });
+    this.opportunityStageDropdown = page.getByRole('combobox', { name: 'Opportunity Stage' });
+    this.dealStageDropdown = page.getByRole('combobox', { name: 'Deal Stage' });
+    this.bidStageDropdown = page.getByRole('combobox', { name: 'Bid Stage' });
+    this.lastActivityDropdown = page.getByRole('combobox', { name: 'Last Activity' });
+    this.daysInSystemDropdown = page.getByRole('combobox', { name: 'Days in System' });
+    this.daysInMarketplaceDropdown = page.getByRole('combobox', { name: 'Days in Marketplace' });
+    this.resetFiltersButton = page.getByRole('button', { name: /^Reset( Filters)?$/ });
+    this.applyFiltersButton = page.getByRole('button', { name: 'Apply Filter', exact: true });
+    this.dealCardButtons = page.getByRole('button', { name: 'View Deal', exact: true });
+    this.saveFilterDialog = page
+      .getByRole('dialog')
+      .filter({ hasText: 'Select an existing saved filter to overwrite' });
+    this.notifyCheckbox = this.saveFilterDialog.getByRole('checkbox', {
+      name: /Get notifications for deals that match your saved filter criteria/,
+    });
+    this.mapFrame = page.frameLocator('iframe[title="Map of Locations"]');
+    this.mapMarkers = this.mapFrame.getByRole('button', { name: /Deals? \| ZIP \d{5}/ });
+    this.currentLocationMarker = this.mapFrame.getByRole('button', { name: 'You are here' });
+    this.mapZipPanelHeading = page.getByText(/^ZIP Code: \d{5}$/);
+    this.mapPanelDealIds = page.getByText(/^MPD-\d+$/);
+    this.homeMarketplaceLink = page.getByText(/^Marketplace\d*$/).first();
+    this.sortSelect = page.getByRole('combobox').filter({ hasText: /Sort:/ });
+    this.dropdownOptions = page.getByRole('option');
+    this.zipLimitMessage = page.getByText(/limit reached/i);
+    this.filtersCloseButton = page.locator('button', { hasText: '✕' }).first();
+    this.saveFilterButton = page.getByRole('button', { name: 'Save Filter', exact: true });
+    this.saveFilterCancelButton = this.saveFilterDialog.getByRole('button', { name: 'Cancel', exact: true });
+    this.loadMoreButton = page.getByRole('button', { name: 'Load More', exact: true });
+    this.invitedBadges = page.getByText('Invited', { exact: true });
+    this.mapIframe = page.locator('iframe[title="Map of Locations"]');
+    this.mapZoomOutButton = this.mapFrame.getByRole('button', { name: 'Zoom out' });
+    this.filtersButtonWithActiveFilters = page.getByRole('button', { name: /^Filters \(\d+\)$/ });
+    this.filtersButtonWithNoFilters = page.getByRole('button', { name: 'Filters', exact: true });
+    this.activeFiltersSummary = page.getByText('Active filters:');
+  }
+
+  viewButton(view: MarketplaceView): Locator {
+    return this.page.getByRole('button', { name: view, exact: true });
+  }
+
+  /** An option of the open dropdown, by its accessible name. */
+  private dropdownOption(name: string, exact = true): Locator {
+    return this.page.getByRole('option', { name, exact });
+  }
+
+  /** An existing saved filter listed in the Save Filter dialog (the overwrite target). */
+  private saveFilterOverwriteOption(name: string): Locator {
+    return this.saveFilterDialog.getByText(name, { exact: true });
+  }
+
+  /**
+   * Live-verified: the closest ancestor containing "MPD-" is `div.deal-name-action-row`
+   * (just the deal ID next to the button) — a sibling of, not an ancestor of, the info
+   * column that actually holds location/Est. ARV/Stage/Last Activity/Opp Age/Listing
+   * Age. Requiring "Opp Age" too climbs to the real per-card container that has both.
+   *
+   * Live-verified (2026-08-11): that "Opp Age" heuristic only holds in Grid
+   * view, where it repeats per card. In List view it's a single column
+   * header, so the climb overshoots to the whole `<table>` for every row —
+   * `self::tr` is checked first and, being the nearer ancestor whenever a
+   * `<tr>` exists (List view), wins before the climb ever reaches that far.
+   */
+  private dealCard(index: number): Locator {
+    return this.dealCardButtons
+      .nth(index)
+      .locator(
+        'xpath=ancestor::*[self::tr or (.//text()[contains(., "MPD-")] and .//text()[contains(., "Opp Age")])][1]',
+      );
+  }
+
+  /** A card's location line — its own `.prop-details` element. */
+  private cardLocation(index: number): Locator {
+    return this.dealCard(index).locator('.prop-details').first();
+  }
+
+  /**
+   * The parent of a card's `<span class="mp-deal-details">Label:</span>` — the
+   * value is a trailing text node there, not inside the label span.
+   */
+  private cardLabelledValue(index: number, label: RegExp): Locator {
+    return this.dealCard(index).getByText(label).first().locator('xpath=..');
+  }
+
+  private cardDealTypeBadge(index: number): Locator {
+    return this.dealCard(index)
+      .getByText(/^(Assignment|Buy|Sell)$/)
+      .first();
+  }
+
+  private mapMarkerForZip(zip: string): Locator {
+    return this.mapFrame.getByRole('button', { name: new RegExp(`Deals? \\| ZIP ${zip}`) });
   }
 
   // ==================== Navigation ====================
@@ -41,9 +246,7 @@ export class MarketplacePage extends BasePage {
    * the click behaved.
    */
   async openFromHome() {
-    // Text-matches "Marketplace" alone; a trailing digit run is the unread-count
-    // badge, which renders inline and would break an exact-text match.
-    const link = this.page.getByText(/^Marketplace\d*$/).first();
+    const link = this.homeMarketplaceLink;
     await link.waitFor({ state: 'visible', timeout: 30000 });
     const context = this.page.context();
     const pagesBefore = context.pages().length;
@@ -63,154 +266,12 @@ export class MarketplacePage extends BasePage {
     await this.dismissTermsIfPresent();
   }
 
-  /**
-   * First-ever visit to Marketplace for an account gates the entire deal
-   * list behind a one-time "Marketplace Terms & Conditions" consent dialog
-   * (full legal text + an "Agree" button). Live-verified 2026-09-04: once
-   * accepted it never reappears for that account — but a freshly reset QA
-   * sandbox or a new test user hits it again, and with no handling here
-   * every downstream call (getDealCardCount/openDealByIndex/
-   * MarketplaceDealPage.expectLoaded) silently saw an empty/blocked page
-   * and hung for the full 60s timeout instead of failing fast. This is
-   * what caused an 18-test cascade across 5 spec files in one run — dismiss
-   * it defensively before every navigate() so that can't happen again.
-   */
-  private get termsAgreeButton() {
-    return this.page.getByRole('button', { name: 'Agree', exact: true });
-  }
-
   private async dismissTermsIfPresent() {
     if (await this.termsAgreeButton.isVisible({ timeout: 3000 }).catch(() => false)) {
       Logger.info('[Marketplace] One-time Terms & Conditions dialog present — accepting it');
       await this.termsAgreeButton.click();
       await this.waitForStabilization(1000);
     }
-  }
-
-  // ==================== Top bar Locators ====================
-
-  private get searchInput() {
-    return this.page.getByPlaceholder('Search by deal name or location...');
-  }
-
-  /**
-   * Live-verified: this button's accessible name is dynamic — plain
-   * "Filters" with none active, but "Filters (N)" once N filters are
-   * applied — so an exact match on the bare word only ever matches the
-   * zero-filters state.
-   */
-  private get filtersButton() {
-    return this.page.getByRole('button', { name: /^Filters(\s\(\d+\))?$/ });
-  }
-
-  private get sortDropdown() {
-    return this.page.locator('select, combobox').filter({ hasText: /Sort:/ }).first();
-  }
-
-  private viewButton(view: MarketplaceView) {
-    return this.page.getByRole('button', { name: view, exact: true });
-  }
-
-  private get refreshButton() {
-    return this.page.getByRole('button', { name: 'Refresh', exact: true });
-  }
-
-  private get termsAcceptButton() {
-    return this.page.getByRole('button', { name: /accept/i }).first();
-  }
-
-  private get emptyStateText() {
-    return this.page.getByText(/No (Marketplace )?deals? found/i).first();
-  }
-
-  // ==================== Filters panel Locators ====================
-
-  private get filtersPanelHeading() {
-    return this.page.getByRole('heading', { name: 'Filters', exact: true });
-  }
-
-  private get savedFilterDropdown() {
-    return this.page.getByRole('combobox', { name: 'Saved Filter' });
-  }
-
-  private get dealStatusDropdown() {
-    return this.page.getByRole('combobox', { name: 'Deal Status' });
-  }
-
-  private get dealTypeDropdown() {
-    return this.page.getByRole('combobox', { name: 'Deal Type' });
-  }
-
-  private get zipCodeInput() {
-    return this.page.getByPlaceholder('Zip Code');
-  }
-
-  private get radiusDropdown() {
-    return this.page.getByRole('combobox', { name: 'Radius' });
-  }
-
-  private get stateDropdown() {
-    return this.page.getByRole('combobox', { name: 'State' });
-  }
-
-  private get opportunityStageDropdown() {
-    return this.page.getByRole('combobox', { name: 'Opportunity Stage' });
-  }
-
-  /** Only rendered when Deal Status = "My Listed Deals". */
-  private get dealStageDropdown() {
-    return this.page.getByRole('combobox', { name: 'Deal Stage' });
-  }
-
-  /** Only rendered when Deal Status = "My Bids". */
-  private get bidStageDropdown() {
-    return this.page.getByRole('combobox', { name: 'Bid Stage' });
-  }
-
-  private get lastActivityDropdown() {
-    return this.page.getByRole('combobox', { name: 'Last Activity' });
-  }
-
-  private get daysInSystemDropdown() {
-    return this.page.getByRole('combobox', { name: 'Days in System' });
-  }
-
-  private get daysInMarketplaceDropdown() {
-    return this.page.getByRole('combobox', { name: 'Days in Marketplace' });
-  }
-
-  /** Same dynamic-label behavior as filtersButton above: "Reset" with nothing to reset, "Reset Filters" once filters are active. */
-  private get resetFiltersButton() {
-    return this.page.getByRole('button', { name: /^Reset( Filters)?$/ });
-  }
-
-  private get applyFiltersButton() {
-    return this.page.getByRole('button', { name: 'Apply Filter', exact: true });
-  }
-
-  // ==================== Deal card Locators ====================
-
-  /** Each deal card as a container, keyed off its own "View Deal" button. */
-  private get dealCardButtons() {
-    return this.page.getByRole('button', { name: 'View Deal', exact: true });
-  }
-
-  /**
-   * Live-verified: the closest ancestor containing "MPD-" is `div.deal-name-action-row`
-   * (just the deal ID next to the button) — a sibling of, not an ancestor of, the info
-   * column that actually holds location/Est. ARV/Stage/Last Activity/Opp Age/Listing
-   * Age. Requiring "Opp Age" too climbs to the real per-card container that has both.
-   *
-   * Live-verified (2026-08-11): that "Opp Age" heuristic only holds in Grid
-   * view, where it repeats per card. In List view it's a single column
-   * header, so the climb overshoots to the whole `<table>` for every row —
-   * `self::tr` is checked first and, being the nearer ancestor whenever a
-   * `<tr>` exists (List view), wins before the climb ever reaches that far.
-   */
-  private dealCard(index: number) {
-    return this.dealCardButtons.nth(index).locator(
-      'xpath=ancestor::*[self::tr or (.//text()[contains(., "MPD-")] and .//text()[contains(., "Opp Age")])][1]',
-    );
   }
 
   // ==================== Top bar Actions ====================
@@ -229,7 +290,7 @@ export class MarketplacePage extends BasePage {
   }
 
   async selectSort(option: 'Sort: Newest' | 'Sort: Oldest') {
-    await this.page.getByRole('combobox').filter({ hasText: /Sort:/ }).selectOption({ label: option });
+    await this.sortSelect.selectOption({ label: option });
     await this.waitForStabilization(1500);
   }
 
@@ -267,13 +328,13 @@ export class MarketplacePage extends BasePage {
   async selectDealStatus(status: DealStatus) {
     await this.openFilters();
     await this.dealStatusDropdown.click();
-    await this.page.getByRole('option', { name: status, exact: true }).click();
+    await this.dropdownOption(status).click();
   }
 
   async selectDealType(type: DealType) {
     await this.openFilters();
     await this.dealTypeDropdown.click();
-    await this.page.getByRole('option', { name: type, exact: true }).click();
+    await this.dropdownOption(type).click();
   }
 
   async enterZipCode(zip: string) {
@@ -290,33 +351,33 @@ export class MarketplacePage extends BasePage {
   async selectRadius(label: string) {
     await this.openFilters();
     await this.radiusDropdown.click();
-    await this.page.getByRole('option', { name: label }).click();
+    await this.dropdownOption(label, false).click();
   }
 
   async selectState(state: string) {
     await this.openFilters();
     await this.stateDropdown.click();
-    await this.page.getByRole('option', { name: state, exact: true }).click();
+    await this.dropdownOption(state).click();
   }
 
   async selectOpportunityStage(stage: MarketplaceStage) {
     await this.openFilters();
     await this.opportunityStageDropdown.click();
-    await this.page.getByRole('option', { name: stage, exact: true }).click();
+    await this.dropdownOption(stage).click();
   }
 
   /** Deal Stage sub-filter — only visible once Deal Status = "My Listed Deals" is selected. */
   async selectDealStage(stage: MarketplaceDealStage) {
     await this.openFilters();
     await this.dealStageDropdown.click();
-    await this.page.getByRole('option', { name: stage, exact: true }).click();
+    await this.dropdownOption(stage).click();
   }
 
   /** Bid Stage sub-filter — only visible once Deal Status = "My Bids" is selected. */
   async selectBidStage(stage: MarketplaceBidStage) {
     await this.openFilters();
     await this.bidStageDropdown.click();
-    await this.page.getByRole('option', { name: stage, exact: true }).click();
+    await this.dropdownOption(stage).click();
   }
 
   async isDealStageFilterVisible(): Promise<boolean> {
@@ -332,19 +393,19 @@ export class MarketplacePage extends BasePage {
   async selectLastActivity(label: string) {
     await this.openFilters();
     await this.lastActivityDropdown.click();
-    await this.page.getByRole('option', { name: label }).click();
+    await this.dropdownOption(label, false).click();
   }
 
   async selectDaysInSystem(label: string) {
     await this.openFilters();
     await this.daysInSystemDropdown.click();
-    await this.page.getByRole('option', { name: label }).click();
+    await this.dropdownOption(label, false).click();
   }
 
   async selectDaysInMarketplace(label: string) {
     await this.openFilters();
     await this.daysInMarketplaceDropdown.click();
-    await this.page.getByRole('option', { name: label }).click();
+    await this.dropdownOption(label, false).click();
   }
 
   async isRadiusEnabled(): Promise<boolean> {
@@ -362,7 +423,7 @@ export class MarketplacePage extends BasePage {
   async getStateOptions(): Promise<string[]> {
     await this.openFilters();
     await this.stateDropdown.click();
-    const options = this.page.getByRole('option');
+    const options = this.dropdownOptions;
     const count = await options.count();
     const labels: string[] = [];
     for (let i = 0; i < count; i++) labels.push(((await options.nth(i).textContent()) || '').trim());
@@ -370,9 +431,17 @@ export class MarketplacePage extends BasePage {
     return labels;
   }
 
+  /** Reads every option label of the Radius dropdown (opened, then closed with Escape). */
+  async getRadiusOptions(): Promise<string[]> {
+    await this.radiusDropdown.click();
+    const labels = (await this.dropdownOptions.allInnerTexts()).map((t) => t.trim());
+    await this.page.keyboard.press('Escape');
+    return labels;
+  }
+
   /** The "Limit reached..." message shown once the Zip Code input hits its 5-character cap. */
   async hasZipLimitMessage(): Promise<boolean> {
-    return this.page.getByText(/limit reached/i).isVisible().catch(() => false);
+    return this.zipLimitMessage.isVisible().catch(() => false);
   }
 
   async getZipCodeValue(): Promise<string> {
@@ -403,8 +472,7 @@ export class MarketplacePage extends BasePage {
 
   /** Collapses the Filters panel via its own "✕" (distinct from the inline info banner's dismiss). */
   async closeFilters() {
-    const closeButton = this.page.locator('button', { hasText: '✕' }).first();
-    if (await closeButton.isVisible().catch(() => false)) await closeButton.click();
+    if (await this.filtersCloseButton.isVisible().catch(() => false)) await this.filtersCloseButton.click();
   }
 
   /** @alias closeFilters — named to match the spreadsheet's "Hide Filter Panel" cases. */
@@ -418,25 +486,16 @@ export class MarketplacePage extends BasePage {
 
   // ==================== Save Filter dialog ====================
 
-  /** "Save Filter" (Filters panel) — pick an existing saved filter to overwrite or Create New, plus the notify checkbox (live-verified QA 2026-10-09). */
-  private get saveFilterDialog() {
-    return this.page.getByRole('dialog').filter({ hasText: 'Select an existing saved filter to overwrite' });
-  }
-
-  private get notifyCheckbox() {
-    return this.saveFilterDialog.getByRole('checkbox', { name: /Get notifications for deals that match your saved filter criteria/ });
-  }
-
   /** Save Filter is disabled until some filter is set — callers pick one first (Cancel then saves nothing). */
   async openSaveFilterDialog() {
     await this.openFilters();
-    await this.page.getByRole('button', { name: 'Save Filter', exact: true }).click();
+    await this.saveFilterButton.click();
     await this.saveFilterDialog.waitFor({ state: 'visible', timeout: 15000 });
   }
 
   /** Selects an existing saved filter in the dialog (the overwrite target) — its own settings load into the form. */
   async selectSavedFilterToOverwrite(name: string) {
-    await this.saveFilterDialog.getByText(name, { exact: true }).click();
+    await this.saveFilterOverwriteOption(name).click();
     await this.waitForStabilization(1000);
   }
 
@@ -445,7 +504,7 @@ export class MarketplacePage extends BasePage {
   }
 
   async cancelSaveFilterDialog() {
-    await this.saveFilterDialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await this.saveFilterCancelButton.click();
     await this.saveFilterDialog.waitFor({ state: 'hidden', timeout: 10000 });
   }
 
@@ -453,10 +512,11 @@ export class MarketplacePage extends BasePage {
   async getSavedFilterNames(): Promise<string[]> {
     await this.openFilters();
     await this.savedFilterDropdown.click();
-    await this.page.getByRole('option', { name: 'None', exact: true }).waitFor({ state: 'visible', timeout: 10000 });
+    await this.dropdownOption('None').waitFor({ state: 'visible', timeout: 10000 });
     // Page-wide options also include the Sort dropdown's two entries.
-    const names = (await this.page.getByRole('option').allInnerTexts())
-      .map((t) => t.trim()).filter((t) => t && t !== 'None' && !t.startsWith('Sort:'));
+    const names = (await this.dropdownOptions.allInnerTexts())
+      .map((t) => t.trim())
+      .filter((t) => t && t !== 'None' && !t.startsWith('Sort:'));
     await this.page.keyboard.press('Escape');
     return names;
   }
@@ -473,7 +533,7 @@ export class MarketplacePage extends BasePage {
    * until it is gone so card counts cover the whole result set.
    */
   async loadAllCards() {
-    const loadMore = this.page.getByRole('button', { name: 'Load More', exact: true });
+    const loadMore = this.loadMoreButton;
     while (await loadMore.isVisible().catch(() => false)) {
       const before = await this.getDealCardCount();
       await loadMore.click();
@@ -499,7 +559,10 @@ export class MarketplacePage extends BasePage {
   }
 
   async getCardMpdId(index: number): Promise<string> {
-    const text = (await this.dealCard(index).textContent().catch(() => '')) || '';
+    const text =
+      (await this.dealCard(index)
+        .textContent()
+        .catch(() => '')) || '';
     return text.match(/MPD-\d+/)?.[0] ?? '';
   }
 
@@ -510,7 +573,11 @@ export class MarketplacePage extends BasePage {
    * regex never matched and this always returned "".
    */
   async getCardLocation(index: number): Promise<string> {
-    return ((await this.dealCard(index).locator('.prop-details').first().textContent().catch(() => '')) || '').trim();
+    return (
+      (await this.cardLocation(index)
+        .textContent()
+        .catch(() => '')) || ''
+    ).trim();
   }
 
   /**
@@ -522,23 +589,43 @@ export class MarketplacePage extends BasePage {
    * to the parent to capture the full "Label: value" text.
    */
   async getCardEstArv(index: number): Promise<string> {
-    return ((await this.dealCard(index).getByText(/Est\. ARV/).first().locator('xpath=..').textContent().catch(() => '')) || '').trim();
+    return (
+      (await this.cardLabelledValue(index, /Est\. ARV/)
+        .textContent()
+        .catch(() => '')) || ''
+    ).trim();
   }
 
   async getCardStage(index: number): Promise<string> {
-    return ((await this.dealCard(index).getByText(/^Stage:/).first().locator('xpath=..').textContent().catch(() => '')) || '').trim();
+    return (
+      (await this.cardLabelledValue(index, /^Stage:/)
+        .textContent()
+        .catch(() => '')) || ''
+    ).trim();
   }
 
   async getCardOppAge(index: number): Promise<string> {
-    return ((await this.dealCard(index).getByText(/Opp Age:/).first().locator('xpath=..').textContent().catch(() => '')) || '').trim();
+    return (
+      (await this.cardLabelledValue(index, /Opp Age:/)
+        .textContent()
+        .catch(() => '')) || ''
+    ).trim();
   }
 
   async getCardListingAge(index: number): Promise<string> {
-    return ((await this.dealCard(index).getByText(/Listing Age:/).first().locator('xpath=..').textContent().catch(() => '')) || '').trim();
+    return (
+      (await this.cardLabelledValue(index, /Listing Age:/)
+        .textContent()
+        .catch(() => '')) || ''
+    ).trim();
   }
 
   async getCardLastActivity(index: number): Promise<string> {
-    return ((await this.dealCard(index).getByText(/Last Activity:/).first().locator('xpath=..').textContent().catch(() => '')) || '').trim();
+    return (
+      (await this.cardLabelledValue(index, /Last Activity:/)
+        .textContent()
+        .catch(() => '')) || ''
+    ).trim();
   }
 
   /**
@@ -562,11 +649,14 @@ export class MarketplacePage extends BasePage {
    * order as the cards themselves.
    */
   async hasInvitedBadge(index: number): Promise<boolean> {
-    return this.page.getByText('Invited', { exact: true }).nth(index).isVisible().catch(() => false);
+    return this.invitedBadges
+      .nth(index)
+      .isVisible()
+      .catch(() => false);
   }
 
   async getCardDealTypeBadge(index: number): Promise<string | null> {
-    const badge = this.dealCard(index).getByText(/^(Assignment|Buy|Sell)$/).first();
+    const badge = this.cardDealTypeBadge(index);
     if (!(await badge.isVisible().catch(() => false))) return null;
     return (await badge.textContent()) ?? null;
   }
@@ -583,7 +673,16 @@ export class MarketplacePage extends BasePage {
   async getCardTexts(): Promise<string[]> {
     const count = await this.getDealCardCount();
     const texts: string[] = [];
-    for (let i = 0; i < count; i++) texts.push(((await this.dealCard(i).innerText().catch(() => '')) || '').replace(/\s+/g, ' ').trim());
+    for (let i = 0; i < count; i++)
+      texts.push(
+        (
+          (await this.dealCard(i)
+            .innerText()
+            .catch(() => '')) || ''
+        )
+          .replace(/\s+/g, ' ')
+          .trim(),
+      );
     return texts;
   }
 
@@ -604,51 +703,10 @@ export class MarketplacePage extends BasePage {
     return labels;
   }
 
-  // ==================== Map View Locators ====================
-
-  /** The embedded map — Salesforce's Lightning Maps component, itself wrapping Google Maps. */
-  private get mapFrame() {
-    return this.page.frameLocator('iframe[title="Map of Locations"]');
-  }
-
-  /**
-   * Every deal marker/pin on the map. Live-verified: markers are real accessible
-   * buttons (not canvas-drawn), aria-labelled e.g. "2 Deals | ZIP 30345" — that
-   * label is also what distinguishes ZIP-grouped clustering (MV_005) and doubles
-   * as the hover-preview content (MV_007), so no separate tooltip locator exists.
-   */
-  private get mapMarkers() {
-    return this.mapFrame.getByRole('button', { name: /Deals? \| ZIP \d{5}/ });
-  }
-
-  private get currentLocationMarker() {
-    return this.mapFrame.getByRole('button', { name: 'You are here' });
-  }
-
-  private mapMarkerForZip(zip: string) {
-    return this.mapFrame.getByRole('button', { name: new RegExp(`Deals? \\| ZIP ${zip}`) });
-  }
-
-  /** Heading of the deal panel a marker click opens, e.g. "ZIP Code: 75240". */
-  private get mapZipPanelHeading() {
-    return this.page.getByText(/^ZIP Code: \d{5}$/);
-  }
-
-  /**
-   * The deal ID links inside the marker's popup panel (MV_006/MV_008).
-   * Live-verified: the panel renders as a plain `role="table"` with no
-   * `rowheader` cells — the deal IDs are just `MPD-NNNNN` text links, so
-   * matching that pattern directly is more reliable than the ARIA grid
-   * roles the panel doesn't actually use.
-   */
-  private get mapPanelDealIds() {
-    return this.page.getByText(/^MPD-\d+$/);
-  }
-
   // ==================== Map View Actions ====================
 
   async isMapVisible(): Promise<boolean> {
-    return this.page.locator('iframe[title="Map of Locations"]').isVisible().catch(() => false);
+    return this.mapIframe.isVisible().catch(() => false);
   }
 
   /**
@@ -704,19 +762,23 @@ export class MarketplacePage extends BasePage {
   async getFirstVisibleMapMarkerZip(): Promise<string> {
     const count = await this.mapMarkers.count();
     const viewport = this.page.viewportSize();
-    const mapBox = await this.page.locator('iframe[title="Map of Locations"]').boundingBox();
+    const mapBox = await this.mapIframe.boundingBox();
     for (let i = 0; i < count; i++) {
       const marker = this.mapMarkers.nth(i);
       const box = await marker.boundingBox();
       if (!box || !viewport) continue;
-      const inView = box.x >= 0 && box.y >= 0
-        && box.x + box.width <= viewport.width && box.y + box.height <= viewport.height;
+      const inView =
+        box.x >= 0 && box.y >= 0 && box.x + box.width <= viewport.width && box.y + box.height <= viewport.height;
       if (!inView) continue;
       // The map pane clips its own content: a pin can sit inside the browser
       // viewport yet outside the pane (live-verified QA 2026-10-09), where a
       // click lands on whatever is next to the map instead.
-      const inPane = !mapBox || (box.x >= mapBox.x && box.y >= mapBox.y
-        && box.x + box.width <= mapBox.x + mapBox.width && box.y + box.height <= mapBox.y + mapBox.height);
+      const inPane =
+        !mapBox ||
+        (box.x >= mapBox.x &&
+          box.y >= mapBox.y &&
+          box.x + box.width <= mapBox.x + mapBox.width &&
+          box.y + box.height <= mapBox.y + mapBox.height);
       if (!inPane) continue;
       if (mapBox) {
         const underWatermark = box.x <= mapBox.x + 110 && box.y + box.height >= mapBox.y + mapBox.height - 40;
@@ -740,7 +802,7 @@ export class MarketplacePage extends BasePage {
     for (let i = 0; i <= maxSteps; i++) {
       const zip = await this.getFirstVisibleMapMarkerZip();
       if (zip) return zip;
-      await this.mapFrame.getByRole('button', { name: 'Zoom out' }).click();
+      await this.mapZoomOutButton.click();
       await this.waitForStabilization(1500);
     }
     return '';

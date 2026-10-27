@@ -1,4 +1,4 @@
-import { Page, expect } from '@playwright/test';
+import { type Page, type Locator, expect } from '@playwright/test';
 import { BasePage } from '../pages/base/BasePage';
 
 /**
@@ -6,22 +6,21 @@ import { BasePage } from '../pages/base/BasePage';
  * Handles duplicate opportunity dialogs, confirmation modals, etc.
  */
 export class ModalComponent extends BasePage {
-  constructor(page: Page) {
-    super(page);
-  }
-
   // ==================== Locators ====================
 
-  private get continueButton() {
-    return this.page.locator('button:has-text("Continue")');
-  }
+  /** "Continue" on the duplicate-opportunity dialog. */
+  private readonly continueButton: Locator;
+  private readonly cancelButton: Locator;
+  private readonly closeButton: Locator;
+  /** Any open SLDS modal / dialog. */
+  private readonly modal: Locator;
 
-  private get cancelButton() {
-    return this.page.getByRole('button', { name: 'Cancel' });
-  }
-
-  private get closeButton() {
-    return this.page.getByRole('button', { name: 'Close' });
+  constructor(page: Page) {
+    super(page);
+    this.continueButton = page.locator('button:has-text("Continue")');
+    this.cancelButton = page.getByRole('button', { name: 'Cancel' });
+    this.closeButton = page.getByRole('button', { name: 'Close' });
+    this.modal = page.locator('.slds-modal, [role="dialog"]').first();
   }
 
   // ==================== Actions ====================
@@ -59,8 +58,6 @@ export class ModalComponent extends BasePage {
   // ==================== Assertions ====================
 
   async expectModalVisible() {
-    await expect(
-      this.page.locator('.slds-modal, [role="dialog"]').first(),
-    ).toBeVisible({ timeout: 10000 });
+    await expect(this.modal).toBeVisible({ timeout: 10000 });
   }
 }

@@ -28,65 +28,88 @@ test.describe('Visibility Matrix & Ad Council / Stage Rules @regression @Marketp
   // =====================================================================
 
   // Covers: RA_034/035
-  test('A Full Network stage deal is visible and offers Place Bid @regression', { tag: '@VIS-01' }, async ({
-    authedPage, data, authedHomePage, authedMarketplacePage, authedMarketplaceDealPage,
-  }) => {
-    await resetToHome(authedPage, authedHomePage, data);
-    await authedMarketplacePage.navigate();
-    await authedMarketplacePage.expectMarketplaceLoaded();
-    await authedMarketplacePage.selectDealStatus('My Listed Deals');
-    await authedMarketplacePage.selectDealStage('Full Network');
-    await authedMarketplacePage.applyFilters();
-    await authedMarketplacePage.expectMarketplaceLoaded();
-    let count = await authedMarketplacePage.getDealCardCount();
+  test(
+    'A Full Network stage deal is visible and offers Place Bid @regression',
+    { tag: '@VIS-01' },
+    async ({ authedPage, data, authedHomePage, authedMarketplacePage, authedMarketplaceDealPage }) => {
+      const listedCount =
+        await test.step('Open the Marketplace filtered to My Listed Deals / Full Network', async () => {
+          await resetToHome(authedPage, authedHomePage, data);
+          await authedMarketplacePage.navigate();
+          await authedMarketplacePage.expectMarketplaceLoaded();
+          await authedMarketplacePage.selectDealStatus('My Listed Deals');
+          await authedMarketplacePage.selectDealStage('Full Network');
+          await authedMarketplacePage.applyFilters();
+          await authedMarketplacePage.expectMarketplaceLoaded();
+          return authedMarketplacePage.getDealCardCount();
+        });
 
-    // Fall back to an unfiltered view if this franchise has no Full Network
-    // *listed* deal of its own — RA_034/035 only requires *a* Full Network
-    // deal to be visible/biddable, not specifically one this account listed.
-    if (count === 0) {
-      await authedMarketplacePage.navigate();
-      await authedMarketplacePage.expectMarketplaceLoaded();
-      count = await authedMarketplacePage.getDealCardCount();
-    }
-    console.log(`${count} candidate deal(s)`);
-    test.skip(count === 0, 'No deal available in current sandbox state');
+      // Fall back to an unfiltered view if this franchise has no Full Network
+      // *listed* deal of its own — RA_034/035 only requires *a* Full Network
+      // deal to be visible/biddable, not specifically one this account listed.
+      const count =
+        listedCount > 0
+          ? listedCount
+          : await test.step('Fall back to the unfiltered listing', async () => {
+              await authedMarketplacePage.navigate();
+              await authedMarketplacePage.expectMarketplaceLoaded();
+              return authedMarketplacePage.getDealCardCount();
+            });
+      console.log(`${count} candidate deal(s)`);
+      test.skip(count === 0, 'No deal available in current sandbox state');
 
-    await authedMarketplacePage.openDealByIndex(0);
-    await authedMarketplaceDealPage.expectLoaded();
-    const eligible = await authedMarketplaceDealPage.isEligibleToBid();
-    console.log(`Place Bid offered = ${eligible}`);
-    expect(typeof eligible).toBe('boolean');
+      await test.step('Open the first deal', async () => {
+        await authedMarketplacePage.openDealByIndex(0);
+        await authedMarketplaceDealPage.expectLoaded();
+      });
 
-    await authedMarketplaceDealPage.close();
-    await settleAfter(authedPage, data);
-  });
+      await test.step('Verify the Place Bid availability resolves, then close the deal', async () => {
+        const eligible = await authedMarketplaceDealPage.isEligibleToBid();
+        console.log(`Place Bid offered = ${eligible}`);
+        expect(typeof eligible).toBe('boolean');
+        await authedMarketplaceDealPage.close();
+      });
+
+      await settleAfter(authedPage, data);
+    },
+  );
 
   // =====================================================================
   // RA_037: Listing franchise sees the full bid list on their own deal
   // =====================================================================
 
   // Covers: RA_037
-  test('Listing franchise can view the Bid List on their own listed deal @regression', { tag: '@VIS-02' }, async ({
-    authedPage, data, authedHomePage, authedMarketplacePage, authedMarketplaceDealPage,
-  }) => {
-    await resetToHome(authedPage, authedHomePage, data);
-    await authedMarketplacePage.navigate();
-    await authedMarketplacePage.expectMarketplaceLoaded();
-    await authedMarketplacePage.selectDealStatus('My Listed Deals');
-    await authedMarketplacePage.applyFilters();
-    await authedMarketplacePage.expectMarketplaceLoaded();
+  test(
+    'Listing franchise can view the Bid List on their own listed deal @regression',
+    { tag: '@VIS-02' },
+    async ({ authedPage, data, authedHomePage, authedMarketplacePage, authedMarketplaceDealPage }) => {
+      const count = await test.step('Open the Marketplace filtered to My Listed Deals', async () => {
+        await resetToHome(authedPage, authedHomePage, data);
+        await authedMarketplacePage.navigate();
+        await authedMarketplacePage.expectMarketplaceLoaded();
+        await authedMarketplacePage.selectDealStatus('My Listed Deals');
+        await authedMarketplacePage.applyFilters();
+        await authedMarketplacePage.expectMarketplaceLoaded();
+        const listed = await authedMarketplacePage.getDealCardCount();
+        console.log(`${listed} deal(s) listed by this franchise`);
+        return listed;
+      });
 
-    const count = await authedMarketplacePage.getDealCardCount();
-    console.log(`${count} deal(s) listed by this franchise`);
-    test.skip(count === 0, 'No deal listed by this franchise in current sandbox state');
+      test.skip(count === 0, 'No deal listed by this franchise in current sandbox state');
 
-    await authedMarketplacePage.openDealByIndex(0);
-    await authedMarketplaceDealPage.expectLoaded();
-    const bidCount = await authedMarketplaceDealPage.getBidHistoryCount();
-    console.log(`Bid List entries visible to Listing Franchise = ${bidCount}`);
-    expect(bidCount).toBeGreaterThanOrEqual(0);
+      await test.step('Open the first listed deal', async () => {
+        await authedMarketplacePage.openDealByIndex(0);
+        await authedMarketplaceDealPage.expectLoaded();
+      });
 
-    await authedMarketplaceDealPage.close();
-    await settleAfter(authedPage, data);
-  });
+      await test.step('Verify the Bid List is readable by the Listing Franchise, then close the deal', async () => {
+        const bidCount = await authedMarketplaceDealPage.getBidHistoryCount();
+        console.log(`Bid List entries visible to Listing Franchise = ${bidCount}`);
+        expect(bidCount).toBeGreaterThanOrEqual(0);
+        await authedMarketplaceDealPage.close();
+      });
+
+      await settleAfter(authedPage, data);
+    },
+  );
 });

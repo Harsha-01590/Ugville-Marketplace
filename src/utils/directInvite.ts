@@ -44,7 +44,9 @@ export async function listWithDirectInvite(
 ): Promise<DirectInviteDeal | null> {
   const oppName = await seller.createFromHome(home, opts.accountName ?? envConfig.FRANCHISE_A_NAME);
   if (!(await seller.isListInMarketplaceCtaShown())) {
-    console.log(`  [DirectInvite] new seller op ${oppName} shows "${await seller.getMarketplaceCtaText()}", not "List in Marketplace"`);
+    console.log(
+      `  [DirectInvite] new seller op ${oppName} shows "${await seller.getMarketplaceCtaText()}", not "List in Marketplace"`,
+    );
     return null;
   }
   await opts.beforeList?.();
@@ -77,7 +79,9 @@ export async function listWithDirectInvite(
   if (!text.includes(dealTerms)) {
     throw new Error(`Newest listed deal ${mpdId} is not the one just saved (Deal Terms "${dealTerms}" not found)`);
   }
-  console.log(`  [DirectInvite] ${oppName} listed as ${type} → ${mpdId}${invitee ? `, invited ${invitee}` : ', no Direct Invite'}`);
+  console.log(
+    `  [DirectInvite] ${oppName} listed as ${type} → ${mpdId}${invitee ? `, invited ${invitee}` : ', no Direct Invite'}`,
+  );
   return { mpdId, oppName, dealTerms, oppDetails, oppId, listingAccount, listToast };
 }
 
@@ -133,13 +137,22 @@ export async function openDealInSecondTab(page: Page, mpdId: string, status?: De
  * The bidding franchise's half of the open (no Direct Invite) flow: opens `mpdId` from Available
  * and bids with `reason`, as `franchise` when given (see openDealAs).
  */
-export async function placeBidAs(marketplace: MarketplacePage, dealPage: MarketplaceDealPage, mpdId: string, reason: string, franchise?: string) {
+export async function placeBidAs(
+  marketplace: MarketplacePage,
+  dealPage: MarketplaceDealPage,
+  mpdId: string,
+  reason: string,
+  franchise?: string,
+) {
   if (!(await openDealAs(marketplace, dealPage, mpdId, 'Available', franchise))) {
     throw new Error(`${mpdId} is not in the bidding franchise's Available deals`);
   }
   await dealPage.openPlaceBidConfirmation(reason);
   await dealPage.submitPlaceBidConfirmation();
-  await dealPage.page.getByText(/You have successfully bid(ed)? for this Deal/).first().waitFor({ state: 'visible', timeout: 30000 }).catch(() => {});
+  await dealPage
+    .messageText(/You have successfully bid(ed)? for this Deal/)
+    .waitFor({ state: 'visible', timeout: 30000 })
+    .catch(() => {});
   await dealPage.waitForStabilization(2000);
   console.log(`  [Bid] placed a bid on ${mpdId}`);
 }

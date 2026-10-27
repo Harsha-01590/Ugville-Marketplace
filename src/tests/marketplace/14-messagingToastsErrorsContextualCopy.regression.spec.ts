@@ -48,7 +48,6 @@ import { listWithDirectInvite } from '../../utils/directInvite';
  *   not attempted.
  */
 
-
 async function resetToHome(authedPage: Page, authedHomePage: HomePage, data: TestData) {
   await authedHomePage.navigate();
   await authedPage.waitForLoadState('domcontentloaded');
@@ -65,117 +64,172 @@ test.describe('Messaging: Toasts, Errors & Contextual Copy @regression @Marketpl
   // =====================================================================
 
   // Covers: ST_006
-  test('CTA no longer reads "List in Marketplace" once the seller op is listed @regression', { tag: '@MSG-01' }, async ({
-    authedPage, data, authedHomePage, authedSellerLeadPage, authedMarketplacePage, authedMarketplaceDealPage,
-  }) => {
-    test.setTimeout(300_000);
-    await resetToHome(authedPage, authedHomePage, data);
-    const deal = await listWithDirectInvite(authedHomePage, authedSellerLeadPage, authedMarketplacePage, authedMarketplaceDealPage, 'Assignment', '');
-    expect(deal, 'fresh seller op offers "List in Marketplace"').not.toBeNull();
-    await authedMarketplaceDealPage.close();
-    await authedSellerLeadPage.navigateById(deal!.oppId);
-    const ctaText = await authedSellerLeadPage.getMarketplaceCtaText();
-    console.log(`CTA text after listing ${deal!.mpdId} = "${ctaText}"`);
-    expect(ctaText).toMatch(/^View (in )?Marketplace/);
-    await settleAfter(authedPage, data);
-  });
+  test(
+    'CTA no longer reads "List in Marketplace" once the seller op is listed @regression',
+    { tag: '@MSG-01' },
+    async ({
+      authedPage,
+      data,
+      authedHomePage,
+      authedSellerLeadPage,
+      authedMarketplacePage,
+      authedMarketplaceDealPage,
+    }) => {
+      test.setTimeout(300_000);
+
+      const deal = await test.step('List a fresh seller op in the Marketplace', async () => {
+        await resetToHome(authedPage, authedHomePage, data);
+        const listed = await listWithDirectInvite(
+          authedHomePage,
+          authedSellerLeadPage,
+          authedMarketplacePage,
+          authedMarketplaceDealPage,
+          'Assignment',
+          '',
+        );
+        expect(listed, 'fresh seller op offers "List in Marketplace"').not.toBeNull();
+        await authedMarketplaceDealPage.close();
+        return listed!;
+      });
+
+      await test.step('Reopen the seller op and verify the CTA now reads "View in Marketplace"', async () => {
+        await authedSellerLeadPage.navigateById(deal.oppId);
+        const ctaText = await authedSellerLeadPage.getMarketplaceCtaText();
+        console.log(`CTA text after listing ${deal.mpdId} = "${ctaText}"`);
+        expect(ctaText).toMatch(/^View (in )?Marketplace/);
+      });
+
+      await settleAfter(authedPage, data);
+    },
+  );
 
   // =====================================================================
   // MSG_018: Already-bid message includes bid status text
   // =====================================================================
 
   // Covers: MSG_018
-  test('The already-bid message references the current bid status @regression', { tag: '@MSG-02' }, async ({
-    authedPage, data, authedHomePage, authedMarketplacePage, authedMarketplaceDealPage,
-  }) => {
-    await resetToHome(authedPage, authedHomePage, data);
-    await authedMarketplacePage.navigate();
-    await authedMarketplacePage.expectMarketplaceLoaded();
-    await authedMarketplacePage.selectDealStatus('My Bids');
-    await authedMarketplacePage.applyFilters();
-    await authedMarketplacePage.expectMarketplaceLoaded();
+  test(
+    'The already-bid message references the current bid status @regression',
+    { tag: '@MSG-02' },
+    async ({ authedPage, data, authedHomePage, authedMarketplacePage, authedMarketplaceDealPage }) => {
+      const count = await test.step('Open the Marketplace filtered to My Bids', async () => {
+        await resetToHome(authedPage, authedHomePage, data);
+        await authedMarketplacePage.navigate();
+        await authedMarketplacePage.expectMarketplaceLoaded();
+        await authedMarketplacePage.selectDealStatus('My Bids');
+        await authedMarketplacePage.applyFilters();
+        await authedMarketplacePage.expectMarketplaceLoaded();
+        return authedMarketplacePage.getDealCardCount();
+      });
 
-    const count = await authedMarketplacePage.getDealCardCount();
-    test.skip(count === 0, 'No deal with a bid from this franchise in current sandbox state');
+      test.skip(count === 0, 'No deal with a bid from this franchise in current sandbox state');
 
-    await authedMarketplacePage.openDealByIndex(0);
-    await authedMarketplaceDealPage.expectLoaded();
-    const hasMessage = await authedMarketplaceDealPage.hasAlreadyBidMessage();
-    if (hasMessage) {
-      const text = await authedMarketplaceDealPage.getAlreadyBidMessageText();
-      console.log(`"${text}"`);
-      expect(text, 'Should reference the current bid status').toMatch(/current bid status/i);
-    } else {
-      console.log('First "My Bids" deal did not show the already-bid message — inconclusive');
-    }
-    await authedMarketplaceDealPage.close();
-    await settleAfter(authedPage, data);
-  });
+      await test.step('Open the first bid deal', async () => {
+        await authedMarketplacePage.openDealByIndex(0);
+        await authedMarketplaceDealPage.expectLoaded();
+      });
+
+      await test.step('Verify the already-bid message references the current bid status', async () => {
+        const hasMessage = await authedMarketplaceDealPage.hasAlreadyBidMessage();
+        if (hasMessage) {
+          const text = await authedMarketplaceDealPage.getAlreadyBidMessageText();
+          console.log(`"${text}"`);
+          expect(text, 'Should reference the current bid status').toMatch(/current bid status/i);
+        } else {
+          console.log('First "My Bids" deal did not show the already-bid message — inconclusive');
+        }
+        await authedMarketplaceDealPage.close();
+      });
+
+      await settleAfter(authedPage, data);
+    },
+  );
 
   // =====================================================================
   // MSG_022: "No Bids were placed yet" on a zero-bid listed deal
   // =====================================================================
 
   // Covers: MSG_022
-  test('A listed deal with zero bids shows the "No Bids" empty state @regression', { tag: '@MSG-03' }, async ({
-    authedPage, data, authedHomePage, authedMarketplacePage, authedMarketplaceDealPage,
-  }) => {
-    await resetToHome(authedPage, authedHomePage, data);
-    await authedMarketplacePage.navigate();
-    await authedMarketplacePage.expectMarketplaceLoaded();
-    await authedMarketplacePage.selectDealStatus('My Listed Deals');
-    await authedMarketplacePage.applyFilters();
-    await authedMarketplacePage.expectMarketplaceLoaded();
+  test(
+    'A listed deal with zero bids shows the "No Bids" empty state @regression',
+    { tag: '@MSG-03' },
+    async ({ authedPage, data, authedHomePage, authedMarketplacePage, authedMarketplaceDealPage }) => {
+      const count = await test.step('Open the Marketplace filtered to My Listed Deals', async () => {
+        await resetToHome(authedPage, authedHomePage, data);
+        await authedMarketplacePage.navigate();
+        await authedMarketplacePage.expectMarketplaceLoaded();
+        await authedMarketplacePage.selectDealStatus('My Listed Deals');
+        await authedMarketplacePage.applyFilters();
+        await authedMarketplacePage.expectMarketplaceLoaded();
+        return authedMarketplacePage.getDealCardCount();
+      });
 
-    const count = await authedMarketplacePage.getDealCardCount();
-    test.skip(count === 0, 'No deal listed by this franchise in current sandbox state');
+      test.skip(count === 0, 'No deal listed by this franchise in current sandbox state');
 
-    for (let i = 0; i < count; i++) {
-      await authedMarketplacePage.openDealByIndex(i);
-      await authedMarketplaceDealPage.expectLoaded();
-      const bidCount = await authedMarketplaceDealPage.getBidHistoryCount();
-      if (bidCount === 0) {
-        const emptyState = authedPage.getByText(/no bids were placed/i);
-        const present = await emptyState.isVisible().catch(() => false);
-        console.log(`Deal index ${i} has 0 bids — "No Bids" message present = ${present}`);
-        await authedMarketplaceDealPage.close();
-        break;
-      }
-      await authedMarketplaceDealPage.close();
-      if (i === count - 1) console.log('No zero-bid listed deal found — inconclusive');
-    }
-    await settleAfter(authedPage, data);
-  });
+      await test.step('Find a zero-bid listed deal and check its "No Bids" message', async () => {
+        for (let i = 0; i < count; i++) {
+          await authedMarketplacePage.openDealByIndex(i);
+          await authedMarketplaceDealPage.expectLoaded();
+          const bidCount = await authedMarketplaceDealPage.getBidHistoryCount();
+          if (bidCount === 0) {
+            const present = await authedMarketplaceDealPage
+              .messageText(/no bids were placed/i)
+              .isVisible()
+              .catch(() => false);
+            console.log(`Deal index ${i} has 0 bids — "No Bids" message present = ${present}`);
+            await authedMarketplaceDealPage.close();
+            break;
+          }
+          await authedMarketplaceDealPage.close();
+          if (i === count - 1) console.log('No zero-bid listed deal found — inconclusive');
+        }
+      });
+
+      await settleAfter(authedPage, data);
+    },
+  );
 
   // =====================================================================
   // MSG_023: "Pending Action from <Franchise>" on a Direct Invite deal
   // =====================================================================
 
   // Covers: MSG_023
-  test('A Direct Invite deal shows a pending-action message to the Listing Franchise @regression', { tag: '@MSG-04' }, async ({
-    authedPage, data, authedHomePage, authedMarketplacePage, authedMarketplaceDealPage,
-  }) => {
-    await resetToHome(authedPage, authedHomePage, data);
-    await authedMarketplacePage.navigate();
-    await authedMarketplacePage.expectMarketplaceLoaded();
-    await authedMarketplacePage.selectDealStatus('My Listed Deals');
-    await authedMarketplacePage.selectDealStage('Direct');
-    await authedMarketplacePage.applyFilters();
-    await authedMarketplacePage.expectMarketplaceLoaded();
+  test(
+    'A Direct Invite deal shows a pending-action message to the Listing Franchise @regression',
+    { tag: '@MSG-04' },
+    async ({ authedPage, data, authedHomePage, authedMarketplacePage, authedMarketplaceDealPage }) => {
+      const count = await test.step('Open the Marketplace filtered to My Listed Deals / Direct', async () => {
+        await resetToHome(authedPage, authedHomePage, data);
+        await authedMarketplacePage.navigate();
+        await authedMarketplacePage.expectMarketplaceLoaded();
+        await authedMarketplacePage.selectDealStatus('My Listed Deals');
+        await authedMarketplacePage.selectDealStage('Direct');
+        await authedMarketplacePage.applyFilters();
+        await authedMarketplacePage.expectMarketplaceLoaded();
+        const direct = await authedMarketplacePage.getDealCardCount();
+        console.log(`${direct} Direct-stage listed deal(s)`);
+        return direct;
+      });
 
-    const count = await authedMarketplacePage.getDealCardCount();
-    console.log(`${count} Direct-stage listed deal(s)`);
-    test.skip(count === 0, 'No Direct-stage listed deal found in current sandbox state');
+      test.skip(count === 0, 'No Direct-stage listed deal found in current sandbox state');
 
-    await authedMarketplacePage.openDealByIndex(0);
-    await authedMarketplaceDealPage.expectLoaded();
-    const pendingMessage = authedPage.getByText(/pending action from/i);
-    const present = await pendingMessage.isVisible().catch(() => false);
-    console.log(`"Pending Action from" message present = ${present}`);
+      await test.step('Open the first Direct-stage deal', async () => {
+        await authedMarketplacePage.openDealByIndex(0);
+        await authedMarketplaceDealPage.expectLoaded();
+      });
 
-    await authedMarketplaceDealPage.close();
-    await settleAfter(authedPage, data);
-  });
+      await test.step('Check for the "Pending Action from" message, then close the deal', async () => {
+        const present = await authedMarketplaceDealPage
+          .messageText(/pending action from/i)
+          .isVisible()
+          .catch(() => false);
+        console.log(`"Pending Action from" message present = ${present}`);
+        await authedMarketplaceDealPage.close();
+      });
+
+      await settleAfter(authedPage, data);
+    },
+  );
 
   // =====================================================================
   // MSG_024: Place Bid confirmation popup echoes the entered reason
@@ -191,105 +245,165 @@ test.describe('Messaging: Toasts, Errors & Contextual Copy @regression @Marketpl
    * identical fix in 08-biddingPlaceBid.regression.spec.ts EG_028-030).
    */
   // Covers: MSG_024
-  test('Place Bid confirmation popup echoes the entered Reason for Bid @regression', { tag: '@MSG-05' }, async ({
-    authedPage, data, authedHomePage, authedMarketplacePage, authedMarketplaceDealPage,
-  }) => {
-    await resetToHome(authedPage, authedHomePage, data);
-    await authedMarketplacePage.navigate();
-    await authedMarketplacePage.expectMarketplaceLoaded();
-    const count = await authedMarketplacePage.getDealCardCount();
-    test.skip(count === 0, 'No deal cards in current sandbox state');
+  test(
+    'Place Bid confirmation popup echoes the entered Reason for Bid @regression',
+    { tag: '@MSG-05' },
+    async ({ authedPage, data, authedHomePage, authedMarketplacePage, authedMarketplaceDealPage }) => {
+      const count = await test.step('Open the Marketplace', async () => {
+        await resetToHome(authedPage, authedHomePage, data);
+        await authedMarketplacePage.navigate();
+        await authedMarketplacePage.expectMarketplaceLoaded();
+        return authedMarketplacePage.getDealCardCount();
+      });
 
-    await authedMarketplacePage.clickFirstItem();
-    await authedMarketplaceDealPage.expectLoaded();
-    const eligible = await authedMarketplaceDealPage.isEligibleToBid();
-    test.skip(!eligible, 'First deal is not eligible to bid on — cannot exercise the Place Bid confirmation');
+      test.skip(count === 0, 'No deal cards in current sandbox state');
 
-    const reason = 'Best opportunity in the area';
-    await authedMarketplaceDealPage.selectFranchiseIfPresent();
-    await authedMarketplaceDealPage.enterBidReason(reason);
-    await authedMarketplaceDealPage.clickPlaceBid();
+      const eligible = await test.step('Open the first deal', async () => {
+        await authedMarketplacePage.clickFirstItem();
+        await authedMarketplaceDealPage.expectLoaded();
+        return authedMarketplaceDealPage.isEligibleToBid();
+      });
 
-    // Live-verified 2026-08-21: "Are you Sure..." and "Reason for Bid" are
-    // sibling elements inside the "Confirm to Bid for this Deal" popup, not
-    // nested — `getByText(/are you sure/i)` alone only matched that one
-    // line's own text, never the popup's other content. Scope to the whole
-    // popup (identified by its own heading) to read everything it shows.
-    const confirmPopup = authedPage.getByRole('dialog').filter({ hasText: 'Confirm to Bid for this Deal' });
-    const popupText = ((await confirmPopup.textContent().catch(() => '')) || '');
-    console.log(`Confirmation popup text = "${popupText}"`);
-    if (popupText) {
-      expect(popupText).toMatch(/reason for bid/i);
-      expect(popupText).toContain(reason);
-    } else {
-      console.log('No confirmation popup text found — inconclusive');
-    }
+      test.skip(!eligible, 'First deal is not eligible to bid on — cannot exercise the Place Bid confirmation');
 
-    // Not finalizing — same non-duplication reasoning as chunk 6's BW_003-005.
-    await authedMarketplaceDealPage.close();
-    await settleAfter(authedPage, data);
-  });
+      const reason = 'Best opportunity in the area';
+
+      await test.step('Enter a Reason for Bid and click Place Bid', async () => {
+        await authedMarketplaceDealPage.selectFranchiseIfPresent();
+        await authedMarketplaceDealPage.enterBidReason(reason);
+        await authedMarketplaceDealPage.clickPlaceBid();
+      });
+
+      await test.step('Verify the confirmation popup echoes the reason', async () => {
+        const popupText = await authedMarketplaceDealPage.getPlaceBidConfirmationText();
+        console.log(`Confirmation popup text = "${popupText}"`);
+        if (popupText) {
+          expect(popupText).toMatch(/reason for bid/i);
+          expect(popupText).toContain(reason);
+        } else {
+          console.log('No confirmation popup text found — inconclusive');
+        }
+      });
+
+      await test.step('Close the deal without bidding', async () => {
+        // Not finalizing — same non-duplication reasoning as chunk 6's BW_003-005.
+        await authedMarketplaceDealPage.close();
+      });
+
+      await settleAfter(authedPage, data);
+    },
+  );
 
   // Covers: EM_001
-  test('An eligible franchise can open a deal and start listing a Seller Opportunity @regression', { tag: '@MSG-06' }, async ({
-    authedPage, data, authedHomePage, authedMarketplacePage, authedMarketplaceDealPage, authedSellerLeadPage,
-  }) => {
-    await resetToHome(authedPage, authedHomePage, data);
-    await authedMarketplacePage.navigate();
-    await authedMarketplacePage.resetFilters();
-    await authedMarketplacePage.expectMarketplaceLoaded();
-    expect(await authedMarketplacePage.getDealCardCount(), 'Available deals are listed').toBeGreaterThan(0);
-    await authedMarketplacePage.openDealByIndex(0);
-    await authedMarketplaceDealPage.expectLoaded();
-    await authedMarketplaceDealPage.close();
+  test(
+    'An eligible franchise can open a deal and start listing a Seller Opportunity @regression',
+    { tag: '@MSG-06' },
+    async ({
+      authedPage,
+      data,
+      authedHomePage,
+      authedMarketplacePage,
+      authedMarketplaceDealPage,
+      authedSellerLeadPage,
+    }) => {
+      await test.step('Open the Marketplace with filters reset', async () => {
+        await resetToHome(authedPage, authedHomePage, data);
+        await authedMarketplacePage.navigate();
+        await authedMarketplacePage.resetFilters();
+        await authedMarketplacePage.expectMarketplaceLoaded();
+        expect(await authedMarketplacePage.getDealCardCount(), 'Available deals are listed').toBeGreaterThan(0);
+      });
 
-    // A fresh seller op is always eligible; the New Deal dialog is cancelled, so nothing is listed.
-    await authedSellerLeadPage.createFromHome(authedHomePage, envConfig.FRANCHISE_A_NAME);
-    expect(await authedSellerLeadPage.isListInMarketplaceCtaShown(), '"List in Marketplace" offered').toBe(true);
-    await authedSellerLeadPage.clickMarketplaceCta();
-    await authedSellerLeadPage.marketplaceListing.expectDealTypeStepContent();
-    await authedSellerLeadPage.marketplaceListing.cancelDealTypeStep();
-    await settleAfter(authedPage, data);
-  });
+      await test.step('Open and close the first Available deal', async () => {
+        await authedMarketplacePage.openDealByIndex(0);
+        await authedMarketplaceDealPage.expectLoaded();
+        await authedMarketplaceDealPage.close();
+      });
+
+      // A fresh seller op is always eligible; the New Deal dialog is cancelled, so nothing is listed.
+      await test.step('Create a fresh seller op and verify "List in Marketplace" is offered', async () => {
+        await authedSellerLeadPage.createFromHome(authedHomePage, envConfig.FRANCHISE_A_NAME);
+        expect(await authedSellerLeadPage.isListInMarketplaceCtaShown(), '"List in Marketplace" offered').toBe(true);
+      });
+
+      await test.step('Open the New Deal dialog, verify its content, then cancel', async () => {
+        await authedSellerLeadPage.clickMarketplaceCta();
+        await authedSellerLeadPage.marketplaceListing.expectDealTypeStepContent();
+        await authedSellerLeadPage.marketplaceListing.cancelDealTypeStep();
+      });
+
+      await settleAfter(authedPage, data);
+    },
+  );
 
   // Covers: EM_002
-  test('View Deal opens the deal detail with no validation error for an eligible franchise @regression', { tag: '@MSG-07' }, async ({
-    authedPage, data, authedHomePage, authedMarketplacePage, authedMarketplaceDealPage,
-  }) => {
-    await resetToHome(authedPage, authedHomePage, data);
-    await authedMarketplacePage.navigate();
-    await authedMarketplacePage.resetFilters();
-    await authedMarketplacePage.expectMarketplaceLoaded();
-    test.skip((await authedMarketplacePage.getDealCardCount()) === 0, 'No Available deals to open');
-    await authedMarketplacePage.openDealByIndex(0);
-    await authedMarketplaceDealPage.expectLoaded();
-    const toast = await authedMarketplaceDealPage.waitForToastText(3000).catch(() => '');
-    console.log(`Deal ${await authedMarketplaceDealPage.getMpdId()} opened; toast = "${toast}"`);
-    expect(toast, 'no error toast on View Deal').not.toMatch(/error|not eligible|failed/i);
-    await authedMarketplaceDealPage.close();
-    await settleAfter(authedPage, data);
-  });
+  test(
+    'View Deal opens the deal detail with no validation error for an eligible franchise @regression',
+    { tag: '@MSG-07' },
+    async ({ authedPage, data, authedHomePage, authedMarketplacePage, authedMarketplaceDealPage }) => {
+      const count = await test.step('Open the Marketplace with filters reset', async () => {
+        await resetToHome(authedPage, authedHomePage, data);
+        await authedMarketplacePage.navigate();
+        await authedMarketplacePage.resetFilters();
+        await authedMarketplacePage.expectMarketplaceLoaded();
+        return authedMarketplacePage.getDealCardCount();
+      });
+
+      test.skip(count === 0, 'No Available deals to open');
+
+      await test.step('Open the first deal', async () => {
+        await authedMarketplacePage.openDealByIndex(0);
+        await authedMarketplaceDealPage.expectLoaded();
+      });
+
+      await test.step('Verify no error toast is shown, then close the deal', async () => {
+        const toast = await authedMarketplaceDealPage.waitForToastText(3000).catch(() => '');
+        console.log(`Deal ${await authedMarketplaceDealPage.getMpdId()} opened; toast = "${toast}"`);
+        expect(toast, 'no error toast on View Deal').not.toMatch(/error|not eligible|failed/i);
+        await authedMarketplaceDealPage.close();
+      });
+
+      await settleAfter(authedPage, data);
+    },
+  );
 
   // Covers: MSG_021, SAN_059
-  test('Filters that match no deals show the "no deals" message and the page stays usable @regression', { tag: '@MSG-08' }, async ({
-    authedPage, data, authedHomePage, authedMarketplacePage,
-  }) => {
-    await resetToHome(authedPage, authedHomePage, data);
-    await authedMarketplacePage.navigate();
-    await authedMarketplacePage.resetFilters();
-    await authedMarketplacePage.expectMarketplaceLoaded();
-    await authedMarketplacePage.selectDealType('Assignment');
-    await authedMarketplacePage.enterZipCode('99950'); // Ketchikan, AK — no QA deals there
-    await authedMarketplacePage.applyFilters();
-    await authedMarketplacePage.expectMarketplaceLoaded();
-    expect(await authedMarketplacePage.getDealCardCount()).toBe(0);
-    await authedMarketplacePage.expectEmptyState();
-    // Wording differs from the spec ("No Deals available in Marketplace"); the app says "No deals found."
-    console.log(`Empty-state text: "${await authedPage.getByText(/No (Marketplace )?deals?/i).first().innerText()}"`);
+  test(
+    'Filters that match no deals show the "no deals" message and the page stays usable @regression',
+    { tag: '@MSG-08' },
+    async ({ authedPage, data, authedHomePage, authedMarketplacePage }) => {
+      await test.step('Open the Marketplace with filters reset', async () => {
+        await resetToHome(authedPage, authedHomePage, data);
+        await authedMarketplacePage.navigate();
+        await authedMarketplacePage.resetFilters();
+        await authedMarketplacePage.expectMarketplaceLoaded();
+      });
 
-    await authedMarketplacePage.resetFilters();
-    await authedMarketplacePage.expectMarketplaceLoaded();
-    expect(await authedMarketplacePage.getDealCardCount(), 'deals come back after Reset Filters').toBeGreaterThan(0);
-    await settleAfter(authedPage, data);
-  });
+      await test.step('Apply filters that match no deals', async () => {
+        await authedMarketplacePage.selectDealType('Assignment');
+        await authedMarketplacePage.enterZipCode('99950'); // Ketchikan, AK — no QA deals there
+        await authedMarketplacePage.applyFilters();
+        await authedMarketplacePage.expectMarketplaceLoaded();
+      });
+
+      await test.step('Verify no cards and the "no deals" message', async () => {
+        expect(await authedMarketplacePage.getDealCardCount()).toBe(0);
+        await authedMarketplacePage.expectEmptyState();
+        // Wording differs from the spec ("No Deals available in Marketplace"); the app says "No deals found."
+        console.log(
+          `Empty-state text: "${await authedMarketplacePage.messageText(/No (Marketplace )?deals?/i).innerText()}"`,
+        );
+      });
+
+      await test.step('Reset filters and verify deals come back', async () => {
+        await authedMarketplacePage.resetFilters();
+        await authedMarketplacePage.expectMarketplaceLoaded();
+        expect(await authedMarketplacePage.getDealCardCount(), 'deals come back after Reset Filters').toBeGreaterThan(
+          0,
+        );
+      });
+
+      await settleAfter(authedPage, data);
+    },
+  );
 });

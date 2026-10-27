@@ -1,4 +1,4 @@
-import { Page, Locator, expect } from '@playwright/test';
+import { type Page, type Locator, expect } from '@playwright/test';
 
 export type MarketplaceDealType = 'Assignment' | 'Opportunity';
 
@@ -19,83 +19,78 @@ export const DEAL_TYPE_DESCRIPTIONS: Record<MarketplaceDealType, string> = {
  * discard the whole flow without creating a Marketplace Deal).
  */
 export class MarketplaceListingComponent {
-  constructor(private page: Page) {}
+  private readonly page: Page;
 
   // ==================== Locators ====================
 
-  private get dealTypeDialogHeading() {
-    return this.page.getByRole('heading', { name: 'New Deal' });
-  }
-
-  /** Radio labels only, exact text — some Opportunity pages render "Opportunity Owner"/"Opportunity Name" field labels behind the dialog (live-verified QA 2026-10-06). */
-  private dealTypeRadioLabel(type: MarketplaceDealType) {
-    return this.page.locator('label.slds-radio__label').filter({ hasText: new RegExp(`^\\s*${type}\\s*$`) });
-  }
-
-  /** Anchored regex — the accessible name may also carry the description text, which mentions "opportunity". */
-  private dealTypeRadio(type: MarketplaceDealType) {
-    return this.page.getByRole('radio', { name: new RegExp(`^${type}`) });
-  }
-
-  private get dealTypePrompt() {
-    return this.page.getByText('List this Marketplace Deal as:');
-  }
-
+  private readonly dealTypeDialogHeading: Locator;
+  private readonly dealTypePrompt: Locator;
   /** Step 1's own "Cancel" button, distinct from the dialog's "✕" (`cancelAndCloseButton`). */
-  private get dealTypeStepCancelButton() {
-    return this.page.getByRole('button', { name: 'Cancel', exact: true });
-  }
-
+  private readonly dealTypeStepCancelButton: Locator;
   /** Step 1 (deal type) and step 2 (deal form) each render their own Next/Save button. */
-  private get nextButton() {
-    return this.page.getByRole('button', { name: 'Next', exact: true });
-  }
-
-  private get backButton() {
-    return this.page.getByRole('button', { name: 'Back', exact: true });
-  }
-
-  private get saveButton() {
-    return this.page.getByRole('button', { name: 'Save', exact: true });
-  }
-
+  private readonly nextButton: Locator;
+  private readonly backButton: Locator;
+  private readonly saveButton: Locator;
   /** The dialog's own "✕" — discards the whole in-progress listing flow without creating a deal. */
-  private get cancelAndCloseButton() {
-    return this.page.getByRole('button', { name: 'Cancel and close' });
-  }
-
+  private readonly cancelAndCloseButton: Locator;
   /**
    * Live-verified QA 2026-10-06: Assignment renders "New Assignment Deal" but
    * Opportunity renders plain "New Deal" — the same text as step 1's heading —
    * so step-2 presence is detected via `dealTermsInput` (step-2-only), not this.
    */
-  private get formHeading() {
-    return this.page.getByRole('heading', { name: /^New (\w+ )?Deal$/ });
-  }
-
-  private get locationInput() {
-    return this.page.getByRole('textbox', { name: 'Location' });
-  }
-
-  private get dealTermsInput() {
-    return this.page.getByRole('textbox', { name: 'Deal Terms' });
-  }
-
-  private get opportunityDetailsInput() {
-    return this.page.getByRole('textbox', { name: 'Opportunity Details' });
-  }
-
-  private get estimatedArvInput() {
-    return this.page.getByRole('spinbutton', { name: 'Estimated ARV' });
-  }
-
-  private get directInviteCombobox() {
-    return this.page.getByRole('combobox', { name: 'Direct Invite' });
-  }
-
+  private readonly formHeading: Locator;
+  private readonly locationInput: Locator;
+  private readonly dealTermsInput: Locator;
+  private readonly opportunityDetailsInput: Locator;
+  private readonly estimatedArvInput: Locator;
+  private readonly directInviteCombobox: Locator;
   /** Scoped to the picker's own listbox — the Opportunity page renders other listboxes whose options would otherwise be read instead. */
-  private get directInviteOptions() {
-    return this.page.getByRole('listbox', { name: 'Direct Invite' }).getByRole('option');
+  private readonly directInviteOptions: Locator;
+  /** Direct Invite is a single-select record picker: a pick shows a "Clear Direct Invite Selection" button (live-verified QA 2026-10-09). */
+  private readonly clearDirectInviteButton: Locator;
+
+  constructor(page: Page) {
+    this.page = page;
+    this.dealTypeDialogHeading = page.getByRole('heading', { name: 'New Deal' });
+    this.dealTypePrompt = page.getByText('List this Marketplace Deal as:');
+    this.dealTypeStepCancelButton = page.getByRole('button', { name: 'Cancel', exact: true });
+    this.nextButton = page.getByRole('button', { name: 'Next', exact: true });
+    this.backButton = page.getByRole('button', { name: 'Back', exact: true });
+    this.saveButton = page.getByRole('button', { name: 'Save', exact: true });
+    this.cancelAndCloseButton = page.getByRole('button', { name: 'Cancel and close' });
+    this.formHeading = page.getByRole('heading', { name: /^New (\w+ )?Deal$/ });
+    this.locationInput = page.getByRole('textbox', { name: 'Location' });
+    this.dealTermsInput = page.getByRole('textbox', { name: 'Deal Terms' });
+    this.opportunityDetailsInput = page.getByRole('textbox', { name: 'Opportunity Details' });
+    this.estimatedArvInput = page.getByRole('spinbutton', { name: 'Estimated ARV' });
+    this.directInviteCombobox = page.getByRole('combobox', { name: 'Direct Invite' });
+    this.directInviteOptions = page.getByRole('listbox', { name: 'Direct Invite' }).getByRole('option');
+    this.clearDirectInviteButton = page.getByRole('button', { name: 'Clear Direct Invite Selection' });
+  }
+
+  /** Radio labels only, exact text — some Opportunity pages render "Opportunity Owner"/"Opportunity Name" field labels behind the dialog (live-verified QA 2026-10-06). */
+  private dealTypeRadioLabel(type: MarketplaceDealType): Locator {
+    return this.page.locator('label.slds-radio__label').filter({ hasText: new RegExp(`^\\s*${type}\\s*$`) });
+  }
+
+  /** Anchored regex — the accessible name may also carry the description text, which mentions "opportunity". */
+  private dealTypeRadio(type: MarketplaceDealType): Locator {
+    return this.page.getByRole('radio', { name: new RegExp(`^${type}`) });
+  }
+
+  /** Step 1's helper text under a deal-type radio. */
+  private dealTypeDescription(type: MarketplaceDealType): Locator {
+    return this.page.getByText(DEAL_TYPE_DESCRIPTIONS[type]);
+  }
+
+  /** A Direct Invite suggestion for the named franchise. */
+  private directInviteOption(name: string): Locator {
+    return this.directInviteOptions.filter({ hasText: name }).first();
+  }
+
+  /** First element anywhere in the dialog showing `text`. */
+  private textOnPage(text: string): Locator {
+    return this.page.getByText(text).first();
   }
 
   // ==================== Actions ====================
@@ -134,7 +129,7 @@ export class MarketplaceListingComponent {
     await expect(this.dealTypePrompt).toBeVisible();
     for (const type of ['Assignment', 'Opportunity'] as const) {
       await expect(this.dealTypeRadio(type)).toBeAttached();
-      await expect(this.page.getByText(DEAL_TYPE_DESCRIPTIONS[type])).toBeVisible();
+      await expect(this.dealTypeDescription(type)).toBeVisible();
     }
     await expect(this.dealTypeStepCancelButton).toBeVisible();
     await expect(this.nextButton).toBeVisible();
@@ -156,7 +151,12 @@ export class MarketplaceListingComponent {
 
   /** LF_007/LF_008 — every field and button of step 2 renders. */
   async expectDealFormFieldsVisible() {
-    for (const field of [this.locationInput, this.dealTermsInput, this.opportunityDetailsInput, this.estimatedArvInput]) {
+    for (const field of [
+      this.locationInput,
+      this.dealTermsInput,
+      this.opportunityDetailsInput,
+      this.estimatedArvInput,
+    ]) {
       await expect(field).toBeVisible();
     }
     expect(await this.isDirectInviteVisible(), 'Direct Invite field should render on the deal details form').toBe(true);
@@ -265,13 +265,17 @@ export class MarketplaceListingComponent {
     await this.directInviteCombobox.click();
     await this.directInviteCombobox.fill(''); // a cleared selection can leave the old search text behind
     await this.directInviteCombobox.pressSequentially(term, { delay: 50 });
-    await this.directInviteOptions.first().waitFor({ state: 'visible', timeout: 10000 }).catch(() => {});
+    await this.directInviteOptions
+      .first()
+      .waitFor({ state: 'visible', timeout: 10000 })
+      .catch(() => {});
   }
 
   /** The options' accessible names — the record picker puts the franchise name in an attribute, not always in its text. */
   async getDirectInviteOptionLabels(): Promise<string[]> {
     const labels = await this.directInviteOptions.evaluateAll((els) =>
-      els.map((el) => el.getAttribute('aria-label') || el.getAttribute('title') || (el as HTMLElement).innerText || ''));
+      els.map((el) => el.getAttribute('aria-label') || el.getAttribute('title') || (el as HTMLElement).innerText || ''),
+    );
     return labels.map((t) => t.trim()).filter(Boolean);
   }
 
@@ -286,12 +290,7 @@ export class MarketplaceListingComponent {
   /** Searches Direct Invite by the franchise name's first word and picks the exact franchise. */
   async selectDirectInviteFranchise(name: string) {
     await this.searchDirectInvite(name.split(/[\s,]+/)[0]);
-    await this.directInviteOptions.filter({ hasText: name }).first().click();
-  }
-
-  /** Direct Invite is a single-select record picker: a pick shows a "Clear Direct Invite Selection" button (live-verified QA 2026-10-09). */
-  private get clearDirectInviteButton() {
-    return this.page.getByRole('button', { name: 'Clear Direct Invite Selection' });
+    await this.directInviteOption(name).click();
   }
 
   async hasDirectInviteSelection(): Promise<boolean> {
@@ -323,7 +322,9 @@ export class MarketplaceListingComponent {
   }
 
   async isTextShown(text: string): Promise<boolean> {
-    return this.page.getByText(text).first().isVisible().catch(() => false);
+    return this.textOnPage(text)
+      .isVisible()
+      .catch(() => false);
   }
 
   async clickBack() {

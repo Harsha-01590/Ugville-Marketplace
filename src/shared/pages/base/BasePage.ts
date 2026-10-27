@@ -1,5 +1,15 @@
-import { Page, Locator, expect } from '@playwright/test';
+import { type Page, type Locator, expect } from '@playwright/test';
 import { Logger } from '../../../utils/logger';
+
+/** Options inside the combobox / lookup that wraps a given input (relative XPath). */
+const COMBOBOX_ANCESTOR_OPTIONS =
+  'xpath=ancestor::*[self::lightning-grouped-combobox or self::lightning-base-combobox or contains(@class,"slds-combobox_container") or @role="combobox"][1]//*[@role="option"]';
+/** Options inside the form element / accordion section that wraps a given input (relative XPath). */
+const FORM_ELEMENT_ANCESTOR_OPTIONS =
+  'xpath=ancestor::*[contains(@class,"slds-form-element") or contains(@class,"slds-accordion__section")][1]//*[@role="option"]';
+/** The accordion section that wraps a given summary span (relative XPath). */
+const ACCORDION_SECTION_ANCESTOR =
+  'xpath=ancestor::*[contains(@class,"slds-accordion__section") or contains(@class,"slds-accordion__list-item") or self::section][1]';
 
 /**
  * BasePage — common functionality shared by all page objects.
@@ -16,18 +26,86 @@ import { Logger } from '../../../utils/logger';
 export class BasePage {
   readonly page: Page;
 
+  // ==================== Locators ====================
+
+  /** Salesforce Lightning loading spinner. */
+  protected readonly spinner: Locator;
+  /** Any open SLDS modal / dialog (e.g. the unprompted "Reminders" dialog). */
+  protected readonly strayModal: Locator;
+  /** The stray modal's Close button. */
+  protected readonly strayModalCloseButton: Locator;
+  /** Options of whichever SLDS combobox / dropdown is currently open. */
+  protected readonly openComboboxOptionItems: Locator;
+  /** Toast notification messages. */
+  protected readonly toastMessages: Locator;
+  /** Inline validation help text under form fields. */
+  protected readonly inlineHelpTexts: Locator;
+  /** A field highlighted with the SLDS error border. */
+  protected readonly errorBorder: Locator;
+  /** Selected stage on the custom UGville listbox path. */
+  protected readonly selectedPathOption: Locator;
+  /** Current stage on the standard SLDS path chevron. */
+  protected readonly activePathItem: Locator;
+  /** "Recently Visited Leads" sidebar heading. */
+  protected readonly recentlyVisitedLeadsHeading: Locator;
+  /** "Recently Visited Leads" toggle in the header banner. */
+  protected readonly recentlyVisitedLeadsToggle: Locator;
+  /** The whole page body, read as text for page-level error checks. */
+  protected readonly pageBody: Locator;
+
   constructor(page: Page) {
     this.page = page;
+    this.spinner = page.locator('lightning-spinner').first();
+    this.strayModal = page.locator('.slds-modal, [role="dialog"]').first();
+    this.strayModalCloseButton = this.strayModal.getByRole('button', { name: 'Close' }).first();
+    this.openComboboxOptionItems = page.locator('.slds-listbox__option, [role="option"], lightning-base-combobox-item');
+    this.toastMessages = page.locator('.toastMessage, .slds-notify__content, [class*="toast-message"]');
+    this.inlineHelpTexts = page.locator(
+      '.slds-form-element__help, [data-error-message], .slds-has-error .slds-form-element__help',
+    );
+    this.errorBorder = page.locator('.slds-has-error').first();
+    this.selectedPathOption = page
+      .locator('listbox [role="option"][aria-selected="true"], listbox option[selected]')
+      .first();
+    this.activePathItem = page.locator('.slds-path__item.slds-is-current').first();
+    this.recentlyVisitedLeadsHeading = page.getByRole('heading', { name: 'Recently Visited Leads', level: 1 });
+    this.recentlyVisitedLeadsToggle = page.getByRole('banner').getByText('Recently Visited Leads').first();
+    this.pageBody = page.locator('body');
+  }
+
+  /** First element showing `text` — for asserting on app messages, banners and toasts from specs. */
+  messageText(text: string | RegExp): Locator {
+    return this.page.getByText(text).first();
+  }
+
+  /** Input located by its `name` attribute. */
+  protected namedInput(name: string): Locator {
+    return this.page.locator(`input[name="${name}"]`).first();
+  }
+
+  /** Options of the listbox with the given id (resolved from an input's aria-controls). */
+  protected listboxOptions(listboxId: string): Locator {
+    return this.page.locator(`#${listboxId} [role="option"]`);
+  }
+
+  /** Locator for an accordion summary span by its title attribute */
+  accordionSummary(title: string): Locator {
+    return this.page.locator(`span.slds-accordion__summary-content[title="${title}"]`).first();
+  }
+
+  /** Body container for an accordion, used to scope queries inside that section */
+  accordionBody(title: string): Locator {
+    // Walk up from the summary span to the closest accordion section/li
+    return this.accordionSummary(title).locator(ACCORDION_SECTION_ANCESTOR);
   }
 
   // ==================== Spinner Helpers ====================
 
   /** Wait for all Salesforce Lightning spinners to disappear */
   async waitForSpinner(timeout = 20000): Promise<void> {
-    const spinner = this.page.locator('lightning-spinner').first();
     // Only wait if the spinner is actually present/visible to avoid aborting calls during transitions
-    if (await spinner.isVisible().catch(() => false)) {
-      await spinner.waitFor({ state: 'hidden', timeout }).catch(() => { });
+    if (await this.spinner.isVisible().catch(() => false)) {
+      await this.spinner.waitFor({ state: 'hidden', timeout }).catch(() => {});
     }
   }
 
@@ -46,7 +124,10 @@ export class BasePage {
    * checks actually want.
    */
   async isEventuallyVisible(locator: Locator, timeout = 10000): Promise<boolean> {
-    return locator.waitFor({ state: 'visible', timeout }).then(() => true, () => false);
+    return locator.waitFor({ state: 'visible', timeout }).then(
+      () => true,
+      () => false,
+    );
   }
 
   /**
@@ -56,7 +137,10 @@ export class BasePage {
    * requiring CSS visibility.
    */
   async isEventuallyPresent(locator: Locator, timeout = 10000): Promise<boolean> {
-    return locator.waitFor({ state: 'attached', timeout }).then(() => true, () => false);
+    return locator.waitFor({ state: 'attached', timeout }).then(
+      () => true,
+      () => false,
+    );
   }
 
   /**
@@ -107,9 +191,7 @@ export class BasePage {
       Logger.warn(`Retrying click (attempt ${i + 1}/${maxRetries})...`);
     }
 
-    throw new Error(
-      `Failed after ${maxRetries} attempts: guard element did not appear.`,
-    );
+    throw new Error(`Failed after ${maxRetries} attempts: guard element did not appear.`);
   }
 
   /**
@@ -122,16 +204,14 @@ export class BasePage {
    * popping up mid-test, after that pre-test check already ran.
    */
   async closeStrayModalIfOpen(): Promise<void> {
-    const modal = this.page.locator('.slds-modal, [role="dialog"]').first();
-    if (!(await modal.isVisible().catch(() => false))) return;
+    if (!(await this.strayModal.isVisible().catch(() => false))) return;
 
-    const closeBtn = modal.getByRole('button', { name: 'Close' }).first();
-    if (await closeBtn.isVisible().catch(() => false)) {
-      await closeBtn.click({ force: true }).catch(() => {});
+    if (await this.strayModalCloseButton.isVisible().catch(() => false)) {
+      await this.strayModalCloseButton.click({ force: true }).catch(() => {});
     } else {
       await this.page.keyboard.press('Escape').catch(() => {});
     }
-    await modal.waitFor({ state: 'hidden', timeout: 5000 }).catch(() => {});
+    await this.strayModal.waitFor({ state: 'hidden', timeout: 5000 }).catch(() => {});
   }
 
   /**
@@ -148,7 +228,9 @@ export class BasePage {
         return;
       } catch (err) {
         if (i === maxRetries - 1) throw err;
-        Logger.warn(`Click intercepted (likely a stray modal) — retrying after dismiss (attempt ${i + 1}/${maxRetries})...`);
+        Logger.warn(
+          `Click intercepted (likely a stray modal) — retrying after dismiss (attempt ${i + 1}/${maxRetries})...`,
+        );
       }
     }
   }
@@ -172,12 +254,7 @@ export class BasePage {
 
     await this.page.waitForTimeout(1000);
 
-    const option = this.page
-      .locator(
-        '.slds-listbox__option, [role="option"], lightning-base-combobox-item',
-      )
-      .filter({ hasText: optionText })
-      .first();
+    const option = this.openComboboxOptionItems.filter({ hasText: optionText }).first();
 
     await option.waitFor({ state: 'visible', timeout: 30000 });
     await option.click({ force: true });
@@ -191,11 +268,7 @@ export class BasePage {
    * Buy Closing) pre-populate their date fields, and this treats an
    * already-populated field as satisfied rather than overwriting it.
    */
-  async fillDateFieldIfEmpty(
-    input: Locator,
-    label: string,
-    daysAhead: number,
-  ): Promise<string | null> {
+  async fillDateFieldIfEmpty(input: Locator, label: string, daysAhead: number): Promise<string | null> {
     try {
       await input.waitFor({ state: 'visible', timeout: 8000 });
     } catch {
@@ -241,7 +314,7 @@ export class BasePage {
 
   /** Reads a date input value by `name` attribute (empty when not rendered). */
   async getNamedDateValue(name: string): Promise<string> {
-    const input = this.page.locator(`input[name="${name}"]`).first();
+    const input = this.namedInput(name);
     if ((await input.count()) === 0) return '';
     return ((await input.inputValue().catch(() => '')) || '').trim();
   }
@@ -252,12 +325,8 @@ export class BasePage {
    * Executed, Estimated Buy Close Date, Hold Start Date, etc.). Format:
    * "MMM D, YYYY" (Salesforce default for the en-US locale).
    */
-  async setNamedDateIfEmpty(
-    name: string,
-    humanLabel: string,
-    daysAhead: number,
-  ): Promise<string | null> {
-    const input = this.page.locator(`input[name="${name}"]`).first();
+  async setNamedDateIfEmpty(name: string, humanLabel: string, daysAhead: number): Promise<string | null> {
+    const input = this.namedInput(name);
     try {
       await input.waitFor({ state: 'visible', timeout: 8000 });
     } catch {
@@ -299,7 +368,7 @@ export class BasePage {
     if (!listboxId) {
       throw new Error('Combobox button is missing aria-controls; cannot scope options safely');
     }
-    const options = this.page.locator(`#${listboxId} [role="option"]`);
+    const options = this.listboxOptions(listboxId);
     await expect.poll(async () => options.count(), { timeout: 15000 }).toBeGreaterThan(0);
     return { options, listboxId };
   }
@@ -325,31 +394,25 @@ export class BasePage {
 
     const listboxId = await input.getAttribute('aria-controls');
     const candidates: Locator[] = [];
-    if (listboxId) candidates.push(this.page.locator(`#${listboxId} [role="option"]`));
-    candidates.push(
-      input.locator(
-        'xpath=ancestor::*[self::lightning-grouped-combobox or self::lightning-base-combobox or contains(@class,"slds-combobox_container") or @role="combobox"][1]//*[@role="option"]'
-      )
-    );
-    candidates.push(
-      input.locator(
-        'xpath=ancestor::*[contains(@class,"slds-form-element") or contains(@class,"slds-accordion__section")][1]//*[@role="option"]'
-      )
-    );
+    if (listboxId) candidates.push(this.listboxOptions(listboxId));
+    candidates.push(input.locator(COMBOBOX_ANCESTOR_OPTIONS));
+    candidates.push(input.locator(FORM_ELEMENT_ANCESTOR_OPTIONS));
 
     let options: Locator | null = null;
     const deadline = Date.now() + 20000;
     while (Date.now() < deadline) {
       for (const cand of candidates) {
-        if ((await cand.count()) > 0) { options = cand; break; }
+        if ((await cand.count()) > 0) {
+          options = cand;
+          break;
+        }
       }
       if (options) break;
       await this.page.waitForTimeout(250);
     }
     if (!options) {
       throw new Error(
-        `No suggestions appeared after clicking the lookup input. ` +
-          `aria-controls=${listboxId ?? 'none'}.`
+        `No suggestions appeared after clicking the lookup input. ` + `aria-controls=${listboxId ?? 'none'}.`,
       );
     }
 
@@ -379,20 +442,12 @@ export class BasePage {
     const listboxId = await input.getAttribute('aria-controls');
     const candidateLocators: Locator[] = [];
     if (listboxId) {
-      candidateLocators.push(this.page.locator(`#${listboxId} [role="option"]`));
+      candidateLocators.push(this.listboxOptions(listboxId));
     }
     // The combobox container that wraps the input
-    candidateLocators.push(
-      input.locator(
-        'xpath=ancestor::*[self::lightning-grouped-combobox or self::lightning-base-combobox or contains(@class,"slds-combobox_container") or @role="combobox"][1]//*[@role="option"]'
-      )
-    );
+    candidateLocators.push(input.locator(COMBOBOX_ANCESTOR_OPTIONS));
     // The closest form element / accordion section
-    candidateLocators.push(
-      input.locator(
-        'xpath=ancestor::*[contains(@class,"slds-form-element") or contains(@class,"slds-accordion__section")][1]//*[@role="option"]'
-      )
-    );
+    candidateLocators.push(input.locator(FORM_ELEMENT_ANCESTOR_OPTIONS));
 
     let options: Locator | null = null;
     const deadline = Date.now() + 20000;
@@ -409,7 +464,7 @@ export class BasePage {
     if (!options) {
       throw new Error(
         `No options appeared for lookup query "${query}". ` +
-          `Tried aria-controls=${listboxId ?? 'none'} and combobox/form-element ancestor scopes.`
+          `Tried aria-controls=${listboxId ?? 'none'} and combobox/form-element ancestor scopes.`,
       );
     }
 
@@ -441,11 +496,7 @@ export class BasePage {
    * (E.g. address results without a house number, like "County Road 43C,
    * Gunnison, CO, USA", can fail to populate property fields downstream.)
    */
-  async searchAndPickRandomOption(
-    input: Locator,
-    query: string,
-    filter?: (text: string) => boolean,
-  ): Promise<string> {
+  async searchAndPickRandomOption(input: Locator, query: string, filter?: (text: string) => boolean): Promise<string> {
     await input.waitFor({ state: 'visible', timeout: 30000 });
     await input.scrollIntoViewIfNeeded();
     await input.click();
@@ -456,13 +507,13 @@ export class BasePage {
     if (!listboxId) {
       throw new Error('Combobox input is missing aria-controls; cannot scope options safely');
     }
-    const options = this.page.locator(`#${listboxId} [role="option"]`);
+    const options = this.listboxOptions(listboxId);
     await expect.poll(async () => options.count(), { timeout: 15000 }).toBeGreaterThan(0);
 
-    const texts = (await options.allInnerTexts()).map(t => t.trim());
+    const texts = (await options.allInnerTexts()).map((t) => t.trim());
     let candidateIndices = texts.map((_, i) => i);
     if (filter) {
-      const filtered = candidateIndices.filter(i => filter(texts[i]));
+      const filtered = candidateIndices.filter((i) => filter(texts[i]));
       if (filtered.length > 0) candidateIndices = filtered;
     }
 
@@ -478,11 +529,7 @@ export class BasePage {
    * option is selected (case-insensitive, trimmed). Otherwise a random
    * non-"None" option is chosen.
    */
-  async pickComboboxOption(
-    comboboxButton: Locator,
-    option: string | undefined,
-    fieldLabel: string
-  ): Promise<string> {
+  async pickComboboxOption(comboboxButton: Locator, option: string | undefined, fieldLabel: string): Promise<string> {
     // Read the current value first; if it already matches the requested option,
     // skip the click entirely. Re-clicking the same option in some Salesforce
     // LWC comboboxes triggers side-effects (e.g. journey re-evaluation) that
@@ -495,9 +542,7 @@ export class BasePage {
         currentText.localeCompare(wanted, undefined, { sensitivity: 'accent' }) === 0 ||
         currentDataValue.localeCompare(wanted, undefined, { sensitivity: 'accent' }) === 0;
       if (matches) {
-        Logger.info(
-          `  -> ${fieldLabel}: already set to "${currentText || currentDataValue}", skipping re-select`
-        );
+        Logger.info(`  -> ${fieldLabel}: already set to "${currentText || currentDataValue}", skipping re-select`);
         return currentText || wanted;
       }
     }
@@ -526,16 +571,16 @@ export class BasePage {
   private async pickComboboxOptionOnce(
     comboboxButton: Locator,
     option: string | undefined,
-    fieldLabel: string
+    fieldLabel: string,
   ): Promise<string> {
     const { options } = await this.openComboboxOptions(comboboxButton);
 
     // Read the visible options up front so we can do a smart match without
     // hanging on a non-existent option.
-    const allTexts = (await options.allInnerTexts()).map(t => t.trim());
+    const allTexts = (await options.allInnerTexts()).map((t) => t.trim());
     const indexed = allTexts.map((t, i) => ({ t, i }));
 
-    const findIndex = (predicate: (t: string) => boolean) => indexed.find(o => predicate(o.t))?.i ?? -1;
+    const findIndex = (predicate: (t: string) => boolean) => indexed.find((o) => predicate(o.t))?.i ?? -1;
 
     let pickedIndex = -1;
     let pickedText = '';
@@ -543,19 +588,19 @@ export class BasePage {
     if (option && option.trim().length > 0) {
       const wanted = option.trim().toLowerCase();
       // exact match -> contains match -> first non-NONE fallback
-      pickedIndex = findIndex(t => t.toLowerCase() === wanted);
-      if (pickedIndex < 0) pickedIndex = findIndex(t => t.toLowerCase().includes(wanted));
+      pickedIndex = findIndex((t) => t.toLowerCase() === wanted);
+      if (pickedIndex < 0) pickedIndex = findIndex((t) => t.toLowerCase().includes(wanted));
       if (pickedIndex < 0) {
-        pickedIndex = findIndex(t => !!t && !/^-?-?\s*none\s*-?-?$/i.test(t));
+        pickedIndex = findIndex((t) => !!t && !/^-?-?\s*none\s*-?-?$/i.test(t));
         if (pickedIndex >= 0) {
           Logger.info(
             `  -> ${fieldLabel}: requested "${option}" not in dropdown ` +
-              `[${allTexts.join(' | ')}]; falling back to "${allTexts[pickedIndex]}"`
+              `[${allTexts.join(' | ')}]; falling back to "${allTexts[pickedIndex]}"`,
           );
         }
       }
     } else {
-      const candidates = indexed.filter(o => o.t && !/^-?-?\s*none\s*-?-?$/i.test(o.t));
+      const candidates = indexed.filter((o) => o.t && !/^-?-?\s*none\s*-?-?$/i.test(o.t));
       if (candidates.length > 0) {
         const r = candidates[Math.floor(Math.random() * candidates.length)];
         pickedIndex = r.i;
@@ -564,9 +609,7 @@ export class BasePage {
 
     if (pickedIndex < 0) {
       await this.closeDropdown();
-      throw new Error(
-        `No selectable option found for ${fieldLabel}. Visible options: [${allTexts.join(' | ')}]`
-      );
+      throw new Error(`No selectable option found for ${fieldLabel}. Visible options: [${allTexts.join(' | ')}]`);
     }
 
     pickedText = allTexts[pickedIndex];
@@ -586,20 +629,6 @@ export class BasePage {
 
   // ==================== Accordion Helpers ====================
 
-  /** Locator for an accordion summary span by its title attribute */
-  accordionSummary(title: string): Locator {
-    return this.page.locator(`span.slds-accordion__summary-content[title="${title}"]`).first();
-  }
-
-  /** Body container for an accordion, used to scope queries inside that section */
-  accordionBody(title: string): Locator {
-    // Walk up from the summary span to the closest accordion section/li
-    return this.accordionSummary(title)
-      .locator(
-        'xpath=ancestor::*[contains(@class,"slds-accordion__section") or contains(@class,"slds-accordion__list-item") or self::section][1]'
-      );
-  }
-
   /**
    * Expands an accordion by clicking its title — but only when the section
    * is currently collapsed. SLDS marks an open accordion with the
@@ -617,9 +646,7 @@ export class BasePage {
     const checkOpen = () =>
       summary
         .evaluate((el) => {
-          const section = (el as HTMLElement).closest(
-            '.slds-accordion__section, .slds-accordion__list-item, section'
-          );
+          const section = (el as HTMLElement).closest('.slds-accordion__section, .slds-accordion__list-item, section');
           if (section?.classList.contains('slds-is-open')) return true;
           const btn = section?.querySelector('button[aria-expanded]') as HTMLButtonElement | null;
           if (btn?.getAttribute('aria-expanded') === 'true') return true;
@@ -654,18 +681,26 @@ export class BasePage {
     const errors: string[] = [];
 
     // Toast error messages
-    const toasts = this.page.locator('.toastMessage, .slds-notify__content, [class*="toast-message"]');
-    const toastCount = await toasts.count();
+    const toastCount = await this.toastMessages.count();
     for (let i = 0; i < toastCount; i++) {
-      const text = ((await toasts.nth(i).textContent().catch(() => '')) ?? '').trim();
+      const text = (
+        (await this.toastMessages
+          .nth(i)
+          .textContent()
+          .catch(() => '')) ?? ''
+      ).trim();
       if (text) errors.push(text);
     }
 
     // Inline validation errors (help text under fields)
-    const helpTexts = this.page.locator('.slds-form-element__help, [data-error-message], .slds-has-error .slds-form-element__help');
-    const helpCount = await helpTexts.count();
+    const helpCount = await this.inlineHelpTexts.count();
     for (let i = 0; i < helpCount; i++) {
-      const text = ((await helpTexts.nth(i).textContent().catch(() => '')) ?? '').trim();
+      const text = (
+        (await this.inlineHelpTexts
+          .nth(i)
+          .textContent()
+          .catch(() => '')) ?? ''
+      ).trim();
       if (text) errors.push(text);
     }
 
@@ -692,12 +727,8 @@ export class BasePage {
     const hasErrors = await this.hasValidationErrors();
     if (!hasErrors) {
       // Also check for generic error indicators
-      const errorBorder = this.page.locator('.slds-has-error').first();
-      const hasErrorBorder = await errorBorder.isVisible().catch(() => false);
-      expect(
-        hasErrorBorder,
-        'A validation error (toast, inline help, or error border) should be visible'
-      ).toBe(true);
+      const hasErrorBorder = await this.errorBorder.isVisible().catch(() => false);
+      expect(hasErrorBorder, 'A validation error (toast, inline help, or error border) should be visible').toBe(true);
     }
   }
 
@@ -706,34 +737,41 @@ export class BasePage {
    */
   async getActiveStageFromPath(timeoutMs = 8000): Promise<string> {
     // Primary: custom LWC listbox path — the selected option has [aria-selected="true"]
-    const selectedOption = this.page.locator('listbox [role="option"][aria-selected="true"], listbox option[selected]').first();
+    const selectedOption = this.selectedPathOption;
     // Fallback: standard SLDS path chevron
-    const activePathItem = this.page.locator('.slds-path__item.slds-is-current').first();
+    const activePathItem = this.activePathItem;
 
     try {
       // Try the listbox option first (used in UGville custom community)
       await selectedOption.waitFor({ state: 'visible', timeout: timeoutMs }).catch(() => {});
       if (await selectedOption.isVisible().catch(() => false)) {
         const text = (await selectedOption.innerText().catch(() => '')).trim();
-        return text.replace(/Stage\s+Complete/gi, '')
-                   .replace(/Current\s+Stage/gi, '')
-                   .replace(/\n+/g, ' ')
-                   .trim();
+        return text
+          .replace(/Stage\s+Complete/gi, '')
+          .replace(/Current\s+Stage/gi, '')
+          .replace(/\n+/g, ' ')
+          .trim();
       }
 
       // Fallback to standard SLDS path
       await activePathItem.waitFor({ state: 'visible', timeout: Math.min(timeoutMs, 5000) });
       const text = (await activePathItem.innerText().catch(() => '')).trim();
-      return text.replace(/Stage\s+Complete/gi, '')
-                 .replace(/Current\s+Stage/gi, '')
-                 .replace(/\n+/g, ' ')
-                 .trim();
+      return text
+        .replace(/Stage\s+Complete/gi, '')
+        .replace(/Current\s+Stage/gi, '')
+        .replace(/\n+/g, ' ')
+        .trim();
     } catch {
       return '';
     }
   }
 
   // ==================== Navigation Helpers ====================
+
+  /** The whole page's text ('' when unreadable) — for page-level checks such as "no server error shown". */
+  async getPageText(): Promise<string> {
+    return (await this.pageBody.textContent().catch(() => '')) ?? '';
+  }
 
   /** Reload page and wait for Salesforce to stabilize */
   async reloadAndWait(stabilizationMs = 5000): Promise<void> {
@@ -749,15 +787,17 @@ export class BasePage {
    * first; if it's already closed, this is a no-op.
    */
   async closeRecentlyVisitedLeadsIfOpen(): Promise<void> {
-    const heading = this.page.getByRole('heading', { name: 'Recently Visited Leads', level: 1 });
-    const button = this.page.getByRole('banner').getByText('Recently Visited Leads').first();
-    
-    const isOpen = await heading.evaluateAll(elements => {
-      return elements.some(el => {
-        const rect = el.getBoundingClientRect();
-        return rect.left < window.innerWidth && rect.right > 0 && rect.width > 0 && rect.height > 0;
-      });
-    }).catch(() => false);
+    const heading = this.recentlyVisitedLeadsHeading;
+    const button = this.recentlyVisitedLeadsToggle;
+
+    const isOpen = await heading
+      .evaluateAll((elements) => {
+        return elements.some((el) => {
+          const rect = el.getBoundingClientRect();
+          return rect.left < window.innerWidth && rect.right > 0 && rect.width > 0 && rect.height > 0;
+        });
+      })
+      .catch(() => false);
 
     if (isOpen) {
       Logger.info('Recently Visited Leads sidebar is open — closing it.');
@@ -765,35 +805,45 @@ export class BasePage {
       // its parent, nor the text node reliably responds to a normal Playwright
       // click here — so we dispatch a click on all three (real .click() plus a
       // synthetic MouseEvent) and let whichever one the widget listens to fire.
-      await button.evaluate(el => {
-        const parent = el.parentElement;
-        if (parent) {
-          const img = parent.querySelector('img');
-          if (img) {
-            img.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, composed: true }));
-            if (typeof (img as any).click === 'function') {
-              (img as any).click();
+      await button
+        .evaluate((el) => {
+          const parent = el.parentElement;
+          if (parent) {
+            const img = parent.querySelector('img');
+            if (img) {
+              img.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, composed: true }));
+              if (typeof (img as HTMLElement).click === 'function') {
+                (img as HTMLElement).click();
+              }
+            }
+            parent.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, composed: true }));
+            if (typeof (parent as HTMLElement).click === 'function') {
+              (parent as HTMLElement).click();
             }
           }
-          parent.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, composed: true }));
-          if (typeof (parent as any).click === 'function') {
-            (parent as any).click();
+          el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, composed: true }));
+          if (typeof (el as HTMLElement).click === 'function') {
+            (el as HTMLElement).click();
           }
-        }
-        el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, composed: true }));
-        if (typeof (el as any).click === 'function') {
-          (el as any).click();
-        }
-      }).catch(() => {});
-      
-      await expect.poll(async () => {
-        return await heading.evaluateAll(elements => {
-          return elements.every(el => {
-            const rect = el.getBoundingClientRect();
-            return rect.left >= window.innerWidth || rect.width === 0;
-          });
-        }).catch(() => true);
-      }, { timeout: 5000 }).toBe(true).catch(() => {});
+        })
+        .catch(() => {});
+
+      await expect
+        .poll(
+          async () => {
+            return await heading
+              .evaluateAll((elements) => {
+                return elements.every((el) => {
+                  const rect = el.getBoundingClientRect();
+                  return rect.left >= window.innerWidth || rect.width === 0;
+                });
+              })
+              .catch(() => true);
+          },
+          { timeout: 5000 },
+        )
+        .toBe(true)
+        .catch(() => {});
     }
   }
 }

@@ -27,17 +27,25 @@ test.describe('Deal Won & Clawback @regression @MarketplaceDealWonClawback', () 
   // Deal Won - Clawback (notifications proxy)
   // =====================================================================
 
-  test('Clawback notifications carry the deal\'s MPD id (proxy for inactivity clawback) @regression', { tag: '@CLAWBACK-01' }, async ({
-    authedPage, data, authedHomePage, authedNotificationsPanelComponent,
-  }) => {
-    await resetToHome(authedPage, authedHomePage, data);
-    await authedNotificationsPanelComponent.openNotifications();
-    const items = await authedNotificationsPanelComponent.getNotificationItems();
-    const clawbacks = items.filter((t) => /clawed back/i.test(t));
-    console.log(`Clawback: ${clawbacks.length} of ${items.length} notification(s) reference a clawback`);
-    for (const text of clawbacks) {
-      expect(text, 'Clawback notification should reference an MPD id').toMatch(/MPD-\d+/);
-    }
-    await settleAfter(authedPage, data);
-  });
+  test(
+    "Clawback notifications carry the deal's MPD id (proxy for inactivity clawback) @regression",
+    { tag: '@CLAWBACK-01' },
+    async ({ authedPage, data, authedHomePage, authedNotificationsPanelComponent }) => {
+      const items = await test.step('Open the notifications panel from Home', async () => {
+        await resetToHome(authedPage, authedHomePage, data);
+        await authedNotificationsPanelComponent.openNotifications();
+        return authedNotificationsPanelComponent.getNotificationItems();
+      });
+
+      await test.step('Verify every clawback notification carries an MPD id', async () => {
+        const clawbacks = items.filter((t) => /clawed back/i.test(t));
+        console.log(`Clawback: ${clawbacks.length} of ${items.length} notification(s) reference a clawback`);
+        for (const text of clawbacks) {
+          expect(text, 'Clawback notification should reference an MPD id').toMatch(/MPD-\d+/);
+        }
+      });
+
+      await settleAfter(authedPage, data);
+    },
+  );
 });

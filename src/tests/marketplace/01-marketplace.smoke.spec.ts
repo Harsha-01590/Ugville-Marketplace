@@ -27,125 +27,172 @@ import { Routes } from '../../enums/routes.enum';
  */
 test.describe('Marketplace Smoke @smoke', () => {
   // Covers: SMK_001
-  test('Marketplace is reachable from Home and loads at /market-place/ @smoke', { tag: '@SMOKE-01' }, async ({
-    authedPage, authedHomePage, authedMarketplacePage,
-  }) => {
-    await authedHomePage.navigate();
-    await authedMarketplacePage.navigate();
-    await authedMarketplacePage.expectMarketplaceLoaded();
-    expect(authedPage.url()).toContain(Routes.MARKETPLACE);
-  });
+  test(
+    'Marketplace is reachable from Home and loads at /market-place/ @smoke',
+    { tag: '@SMOKE-01' },
+    async ({ authedPage, authedHomePage, authedMarketplacePage }) => {
+      await test.step('Open the Marketplace from Home', async () => {
+        await authedHomePage.navigate();
+        await authedMarketplacePage.navigate();
+        await authedMarketplacePage.expectMarketplaceLoaded();
+      });
+
+      await test.step('Verify the Marketplace route is loaded', async () => {
+        expect(authedPage.url()).toContain(Routes.MARKETPLACE);
+      });
+    },
+  );
 
   // Covers: SMK_004/005
-  test('An Available deal card shows Deal Terms, ARV, Stage, and Age fields @smoke', { tag: '@SMOKE-02' }, async ({
-    authedHomePage, authedMarketplacePage,
-  }) => {
-    await authedHomePage.navigate();
-    await authedMarketplacePage.navigate();
-    await authedMarketplacePage.expectMarketplaceLoaded();
-    const count = await authedMarketplacePage.getDealCardCount();
-    test.skip(count === 0, 'No deal cards in current sandbox state');
+  test(
+    'An Available deal card shows Deal Terms, ARV, Stage, and Age fields @smoke',
+    { tag: '@SMOKE-02' },
+    async ({ authedHomePage, authedMarketplacePage }) => {
+      const count = await test.step('Open the Marketplace from Home', async () => {
+        await authedHomePage.navigate();
+        await authedMarketplacePage.navigate();
+        await authedMarketplacePage.expectMarketplaceLoaded();
+        return authedMarketplacePage.getDealCardCount();
+      });
 
-    const arv = await authedMarketplacePage.getCardEstArv(0);
-    const stage = await authedMarketplacePage.getCardStage(0);
-    expect(arv.length).toBeGreaterThan(0);
-    expect(stage.length).toBeGreaterThan(0);
-  });
+      test.skip(count === 0, 'No deal cards in current sandbox state');
+
+      await test.step('Verify the first card shows Est. ARV and Stage', async () => {
+        const arv = await authedMarketplacePage.getCardEstArv(0);
+        const stage = await authedMarketplacePage.getCardStage(0);
+        expect(arv.length).toBeGreaterThan(0);
+        expect(stage.length).toBeGreaterThan(0);
+      });
+    },
+  );
 
   // Covers: SMK_006
-  test('View Deal opens the deal detail as a modal on Web @smoke', { tag: '@SMOKE-03' }, async ({
-    authedHomePage, authedMarketplacePage, authedMarketplaceDealPage,
-  }) => {
-    await authedHomePage.navigate();
-    await authedMarketplacePage.navigate();
-    await authedMarketplacePage.expectMarketplaceLoaded();
-    const count = await authedMarketplacePage.getDealCardCount();
-    test.skip(count === 0, 'No deal cards in current sandbox state');
+  test(
+    'View Deal opens the deal detail as a modal on Web @smoke',
+    { tag: '@SMOKE-03' },
+    async ({ authedHomePage, authedMarketplacePage, authedMarketplaceDealPage }) => {
+      const count = await test.step('Open the Marketplace from Home', async () => {
+        await authedHomePage.navigate();
+        await authedMarketplacePage.navigate();
+        await authedMarketplacePage.expectMarketplaceLoaded();
+        return authedMarketplacePage.getDealCardCount();
+      });
 
-    await authedMarketplacePage.clickFirstItem();
-    await authedMarketplaceDealPage.expectLoaded();
-    await expect(authedMarketplaceDealPage.modalHeading).toBeVisible();
-    await authedMarketplaceDealPage.close();
-  });
+      test.skip(count === 0, 'No deal cards in current sandbox state');
+
+      await test.step('Open the first deal with View Deal', async () => {
+        await authedMarketplacePage.clickFirstItem();
+        await authedMarketplaceDealPage.expectLoaded();
+      });
+
+      await test.step('Verify the deal detail opens as a modal, then close it', async () => {
+        await expect(authedMarketplaceDealPage.modalHeading).toBeVisible();
+        await authedMarketplaceDealPage.close();
+      });
+    },
+  );
 
   // Covers: SMK_009
-  test('A franchise\'s own bid shows Bid Status = In Review under My Bids @smoke', { tag: '@SMOKE-04' }, async ({
-    authedHomePage, authedMarketplacePage, authedMarketplaceDealPage,
-  }) => {
-    await authedHomePage.navigate();
-    await authedMarketplacePage.navigate();
-    await authedMarketplacePage.expectMarketplaceLoaded();
-    await authedMarketplacePage.selectDealStatus('My Bids');
-    await authedMarketplacePage.selectBidStage('In Review');
-    await authedMarketplacePage.applyFilters();
-    await authedMarketplacePage.expectMarketplaceLoaded();
-    const count = await authedMarketplacePage.getDealCardCount();
-    test.skip(count === 0, 'No In Review bid in current sandbox state');
+  test(
+    "A franchise's own bid shows Bid Status = In Review under My Bids @smoke",
+    { tag: '@SMOKE-04' },
+    async ({ authedHomePage, authedMarketplacePage, authedMarketplaceDealPage }) => {
+      const count = await test.step('Open the Marketplace filtered to My Bids / In Review', async () => {
+        await authedHomePage.navigate();
+        await authedMarketplacePage.navigate();
+        await authedMarketplacePage.expectMarketplaceLoaded();
+        await authedMarketplacePage.selectDealStatus('My Bids');
+        await authedMarketplacePage.selectBidStage('In Review');
+        await authedMarketplacePage.applyFilters();
+        await authedMarketplacePage.expectMarketplaceLoaded();
+        return authedMarketplacePage.getDealCardCount();
+      });
 
-    // Live-verified 2026-09-16: "My Bids" + Bid Stage "In Review" can also
-    // surface a pending Direct Invite (Accept/Decline Invite, no bid placed
-    // yet) alongside genuine already-bid deals — index 0 isn't reliably one
-    // or the other, so scan for a deal that actually shows the "already bid"
-    // message rather than assuming the first card is it.
-    let found = false;
-    for (let i = 0; i < count; i++) {
-      await authedMarketplacePage.openDealByIndex(i);
-      await authedMarketplaceDealPage.expectLoaded();
-      if (await authedMarketplaceDealPage.hasAlreadyBidMessage()) {
-        found = true;
-        await authedMarketplaceDealPage.close();
-        break;
-      }
-      await authedMarketplaceDealPage.close();
-    }
-    test.skip(!found, 'No already-bid deal found under My Bids/In Review — only pending Direct Invites present');
-    expect(found).toBe(true);
-  });
+      test.skip(count === 0, 'No In Review bid in current sandbox state');
+
+      // Live-verified 2026-09-16: "My Bids" + Bid Stage "In Review" can also
+      // surface a pending Direct Invite (Accept/Decline Invite, no bid placed
+      // yet) alongside genuine already-bid deals — index 0 isn't reliably one
+      // or the other, so scan for a deal that actually shows the "already bid"
+      // message rather than assuming the first card is it.
+      const found = await test.step('Find a deal that shows the "already bid" message', async () => {
+        for (let i = 0; i < count; i++) {
+          await authedMarketplacePage.openDealByIndex(i);
+          await authedMarketplaceDealPage.expectLoaded();
+          const alreadyBid = await authedMarketplaceDealPage.hasAlreadyBidMessage();
+          await authedMarketplaceDealPage.close();
+          if (alreadyBid) return true;
+        }
+        return false;
+      });
+
+      test.skip(!found, 'No already-bid deal found under My Bids/In Review — only pending Direct Invites present');
+
+      await test.step('Verify an In Review bid was found', async () => {
+        expect(found).toBe(true);
+      });
+    },
+  );
 
   // Covers: SMK_012
-  test('Withdraw Bid is offered on an In Review bid @smoke', { tag: '@SMOKE-05' }, async ({
-    authedHomePage, authedMarketplacePage, authedMarketplaceDealPage,
-  }) => {
-    await authedHomePage.navigate();
-    await authedMarketplacePage.navigate();
-    await authedMarketplacePage.expectMarketplaceLoaded();
-    await authedMarketplacePage.selectDealStatus('My Bids');
-    await authedMarketplacePage.selectBidStage('In Review');
-    await authedMarketplacePage.applyFilters();
-    await authedMarketplacePage.expectMarketplaceLoaded();
-    const count = await authedMarketplacePage.getDealCardCount();
-    test.skip(count === 0, 'No In Review bid in current sandbox state');
+  test(
+    'Withdraw Bid is offered on an In Review bid @smoke',
+    { tag: '@SMOKE-05' },
+    async ({ authedHomePage, authedMarketplacePage, authedMarketplaceDealPage }) => {
+      const count = await test.step('Open the Marketplace filtered to My Bids / In Review', async () => {
+        await authedHomePage.navigate();
+        await authedMarketplacePage.navigate();
+        await authedMarketplacePage.expectMarketplaceLoaded();
+        await authedMarketplacePage.selectDealStatus('My Bids');
+        await authedMarketplacePage.selectBidStage('In Review');
+        await authedMarketplacePage.applyFilters();
+        await authedMarketplacePage.expectMarketplaceLoaded();
+        return authedMarketplacePage.getDealCardCount();
+      });
 
-    // Same Direct-Invite-vs-genuine-bid caveat as SMK_009 above — scan
-    // instead of trusting index 0.
-    let found = false;
-    for (let i = 0; i < count; i++) {
-      await authedMarketplacePage.openDealByIndex(i);
-      await authedMarketplaceDealPage.expectLoaded();
-      if (await authedMarketplaceDealPage.hasWithdrawBidOption()) {
-        found = true;
-        await authedMarketplaceDealPage.close();
-        break;
-      }
-      await authedMarketplaceDealPage.close();
-    }
-    test.skip(!found, 'No withdrawable In Review bid found — only pending Direct Invites present');
-    expect(found).toBe(true);
-  });
+      test.skip(count === 0, 'No In Review bid in current sandbox state');
+
+      // Same Direct-Invite-vs-genuine-bid caveat as SMK_009 above — scan
+      // instead of trusting index 0.
+      const found = await test.step('Find a deal that offers Withdraw Bid', async () => {
+        for (let i = 0; i < count; i++) {
+          await authedMarketplacePage.openDealByIndex(i);
+          await authedMarketplaceDealPage.expectLoaded();
+          const withdrawable = await authedMarketplaceDealPage.hasWithdrawBidOption();
+          await authedMarketplaceDealPage.close();
+          if (withdrawable) return true;
+        }
+        return false;
+      });
+
+      test.skip(!found, 'No withdrawable In Review bid found — only pending Direct Invites present');
+
+      await test.step('Verify Withdraw Bid is offered', async () => {
+        expect(found).toBe(true);
+      });
+    },
+  );
 
   // Covers: SMK_015
-  test('A Direct Invite deal carries the "Invited" tag @smoke', { tag: '@SMOKE-06' }, async ({
-    authedHomePage, authedMarketplacePage,
-  }) => {
-    await authedHomePage.navigate();
-    await authedMarketplacePage.navigate();
-    await authedMarketplacePage.expectMarketplaceLoaded();
-    await authedMarketplacePage.selectDealStatus('My Direct Invites');
-    await authedMarketplacePage.applyFilters();
-    await authedMarketplacePage.expectMarketplaceLoaded();
-    const count = await authedMarketplacePage.getDealCardCount();
-    test.skip(count === 0, 'No Direct Invite deal in current sandbox state');
+  test(
+    'A Direct Invite deal carries the "Invited" tag @smoke',
+    { tag: '@SMOKE-06' },
+    async ({ authedHomePage, authedMarketplacePage }) => {
+      const count = await test.step('Open the Marketplace filtered to My Direct Invites', async () => {
+        await authedHomePage.navigate();
+        await authedMarketplacePage.navigate();
+        await authedMarketplacePage.expectMarketplaceLoaded();
+        await authedMarketplacePage.selectDealStatus('My Direct Invites');
+        await authedMarketplacePage.applyFilters();
+        await authedMarketplacePage.expectMarketplaceLoaded();
+        return authedMarketplacePage.getDealCardCount();
+      });
 
-    expect(await authedMarketplacePage.hasInvitedBadge(0)).toBe(true);
-  });
+      test.skip(count === 0, 'No Direct Invite deal in current sandbox state');
+
+      await test.step('Verify the first card carries the "Invited" tag', async () => {
+        expect(await authedMarketplacePage.hasInvitedBadge(0)).toBe(true);
+      });
+    },
+  );
 });

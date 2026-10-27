@@ -14,7 +14,7 @@
     "declarationMap": true,
     "sourceMap": true,
     "outDir": "./dist",
-    "rootDir": "./src",
+    "rootDir": ".",
     "paths": {
       "@config/*": ["./src/config/*"],
       "@enums/*": ["./src/enums/*"],
@@ -24,6 +24,6 @@
       "@utils/*": ["./src/utils/*"]
     }
   },
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*.ts", "playwright.config.ts"],
   "exclude": ["node_modules", "dist", "test-results", "playwright-report"]
 }

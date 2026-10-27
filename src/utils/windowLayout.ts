@@ -18,12 +18,14 @@ export async function tileWindow(page: Page, side: 'left' | 'right') {
     const cdp = await page.context().newCDPSession(page);
     const { windowId } = await cdp.send('Browser.getWindowForTarget');
     // Usable screen area (excludes the top bar/dock).
-    const screen = await page.evaluate(() => ({
-      w: window.screen.availWidth,
-      h: window.screen.availHeight,
-      x: (window.screen as unknown as { availLeft?: number }).availLeft ?? 0,
-      y: (window.screen as unknown as { availTop?: number }).availTop ?? 0,
-    })).catch(() => ({ w: 1920, h: 1080, x: 0, y: 0 }));
+    const screen = await page
+      .evaluate(() => ({
+        w: window.screen.availWidth,
+        h: window.screen.availHeight,
+        x: (window.screen as unknown as { availLeft?: number }).availLeft ?? 0,
+        y: (window.screen as unknown as { availTop?: number }).availTop ?? 0,
+      }))
+      .catch(() => ({ w: 1920, h: 1080, x: 0, y: 0 }));
     const half = Math.floor(screen.w / 2);
     const want = { left: screen.x + (side === 'left' ? 0 : half), top: screen.y, width: half, height: screen.h };
 

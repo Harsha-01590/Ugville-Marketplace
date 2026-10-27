@@ -1,4 +1,4 @@
-import { Page, expect } from '@playwright/test';
+import { type Page, type Locator, expect } from '@playwright/test';
 import { BasePage } from '../../../shared/pages/base/BasePage';
 
 /**
@@ -24,29 +24,27 @@ import { BasePage } from '../../../shared/pages/base/BasePage';
  * timestamp, plus a "Mark all as read" text control above the list.
  */
 export class NotificationsPanelComponent extends BasePage {
-  constructor(page: Page) {
-    super(page);
-  }
-
   // ==================== Locators ====================
 
   /** The bell icon's accessible-name label; clicking it opens the panel (bubbles to the real click handler on its ancestor). */
-  private get notificationBellArea() {
-    return this.page.getByText('Notifications', { exact: true }).first();
-  }
-
+  private readonly notificationBellArea: Locator;
   /** The unread-count badge — a distinct `.notification-count` div, not part of the bell's own text (see class docstring). */
-  private get notificationBadge() {
-    return this.page.locator('.notification-container .notification-count, .notification-count').first();
-  }
-
-  private get markAllAsReadButton() {
-    return this.page.getByText('Mark all as read', { exact: true });
-  }
-
+  private readonly notificationBadge: Locator;
+  private readonly markAllAsReadButton: Locator;
   /** Each real notification entry — a `listitem` whose text includes a relative ("X ago") or absolute (AM/PM) timestamp, matching every notification observed live this session. */
-  private get notificationItems() {
-    return this.page.getByRole('listitem').filter({ hasText: /ago|AM|PM/ });
+  private readonly notificationItems: Locator;
+
+  constructor(page: Page) {
+    super(page);
+    this.notificationBellArea = page.getByText('Notifications', { exact: true }).first();
+    this.notificationBadge = page.locator('.notification-container .notification-count, .notification-count').first();
+    this.markAllAsReadButton = page.getByText('Mark all as read', { exact: true });
+    this.notificationItems = page.getByRole('listitem').filter({ hasText: /ago|AM|PM/ });
+  }
+
+  /** The "jump to record" icon at the end of a notification row — the row's only navigation trigger. */
+  private jumpIcon(row: Locator): Locator {
+    return row.locator('[icon-name="utility:jump_to_right"]');
   }
 
   // ==================== Actions ====================
@@ -84,7 +82,7 @@ export class NotificationsPanelComponent extends BasePage {
    */
   async clickFirstNotification() {
     const first = this.notificationItems.first();
-    const jumpIcon = first.locator('[icon-name="utility:jump_to_right"]');
+    const jumpIcon = this.jumpIcon(first);
     if (await jumpIcon.isVisible().catch(() => false)) {
       await jumpIcon.click();
       await this.page.waitForTimeout(2000);
@@ -120,6 +118,9 @@ export class NotificationsPanelComponent extends BasePage {
     const badgePresent = await this.notificationBadge.isVisible().catch(() => false);
     if (!badgePresent) return; // fully read — nothing to assert on the badge itself
     const text = ((await this.notificationBadge.textContent().catch(() => '')) || '').trim();
-    expect(/^\d+$/.test(text), `Notification badge, when rendered, should show a numeric unread count (was "${text}")`).toBe(true);
+    expect(
+      /^\d+$/.test(text),
+      `Notification badge, when rendered, should show a numeric unread count (was "${text}")`,
+    ).toBe(true);
   }
 }
