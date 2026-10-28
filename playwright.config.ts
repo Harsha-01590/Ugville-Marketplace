@@ -145,53 +145,53 @@ export default defineConfig({
     // ── Cross-browser: Firefox (opt-in via CROSS_BROWSER=1) ─────────────
     ...(crossBrowser
       ? [
-          {
-            name: 'firefox',
-            use: {
-              ...devices['Desktop Firefox'],
-              // Firefox is significantly slower than Chrome on Salesforce LWC;
-              // disable slowMo to avoid compounding latency.
-              launchOptions: { slowMo: 0 },
-            },
-            // Run only smoke + core regression tags on Firefox
-            grep: /@smoke|@regression/,
-            // Visual tests use Chrome baselines, skip on Firefox
-            testIgnore: ['**/visualRegression*'],
+        {
+          name: 'firefox',
+          use: {
+            ...devices['Desktop Firefox'],
+            // Firefox is significantly slower than Chrome on Salesforce LWC;
+            // disable slowMo to avoid compounding latency.
+            launchOptions: { slowMo: 0 },
           },
-        ]
+          // Run only smoke + core regression tags on Firefox
+          grep: /@smoke|@regression/,
+          // Visual tests use Chrome baselines, skip on Firefox
+          testIgnore: ['**/visualRegression*'],
+        },
+      ]
       : []),
 
     // ── Cross-browser: WebKit / Safari (opt-in via CROSS_BROWSER=1) ──────
     ...(crossBrowser
       ? [
-          {
-            name: 'webkit',
-            use: {
-              ...devices['Desktop Safari'],
-              launchOptions: { slowMo: 0 },
-            },
-            grep: /@smoke|@regression/,
-            testIgnore: ['**/visualRegression*'],
+        {
+          name: 'webkit',
+          use: {
+            ...devices['Desktop Safari'],
+            launchOptions: { slowMo: 0 },
           },
-        ]
+          grep: /@smoke|@regression/,
+          testIgnore: ['**/visualRegression*'],
+        },
+      ]
       : []),
 
     // ── Mobile: Chrome on Pixel 5 viewport (opt-in via MOBILE=1) ─────────
     ...(mobile
       ? [
-          {
-            name: 'mobile-chrome',
-            use: {
-              ...devices['Pixel 5'],
-              // Salesforce LWC on mobile can be very slow — give it more headroom
-              navigationTimeout: 90_000,
-              launchOptions: { slowMo: 800 },
-            },
-            // Mobile smoke + home/community modules only (limited mobile support)
-            grep: /@smoke|@Community|@Learning|@Marketplace/,
-            testIgnore: ['**/visualRegression*'],
+        {
+          name: 'mobile-chrome',
+          use: {
+            ...devices['Pixel 5'],
+            // Salesforce LWC on mobile can be very slow — give it more headroom
+            navigationTimeout: 90_000,
+            launchOptions: { slowMo: 800 },
           },
-        ]
+          // Mobile smoke + home/community modules only (limited mobile support)
+          grep: /@smoke|@Community|@Learning|@Marketplace/,
+          testIgnore: ['**/visualRegression*'],
+        },
+      ]
       : []),
 
     // ── Full regression suite (opt-in via FULL_SUITE=1) ──────────────────
@@ -205,90 +205,90 @@ export default defineConfig({
     // Run with: FULL_SUITE=1 npx playwright test --project=full-suite
     ...(fullSuite
       ? [
-          {
-            name: 'full-suite',
-            use: {
-              ...desktopChromeBase,
-              channel: 'chrome',
-              ...(isHeaded
-                ? { viewport: null, launchOptions: { slowMo: 1200, args: HEADED_CHROMIUM_ARGS } }
-                : { deviceScaleFactor: desktopChromeScale }),
-            },
-            testMatch: ['**/fullRegressionSuite*'],
+        {
+          name: 'full-suite',
+          use: {
+            ...desktopChromeBase,
+            channel: 'chrome',
+            ...(isHeaded
+              ? { viewport: null, launchOptions: { slowMo: 1200, args: HEADED_CHROMIUM_ARGS } }
+              : { deviceScaleFactor: desktopChromeScale }),
           },
-        ]
+          testMatch: ['**/fullRegressionSuite*'],
+        },
+      ]
       : []),
 
     // ── Priority suites (opt-in via PRIORITY_SUITE=high|medium|low|all) ───
     ...(prioritySuite === 'high' || prioritySuite === 'all'
       ? [
-          {
-            name: 'priority-high',
-            use: {
-              ...desktopChromeBase,
-              channel: 'chrome',
-              ...(isHeaded
-                ? { viewport: null, launchOptions: { slowMo: 1200, args: HEADED_CHROMIUM_ARGS } }
-                : { deviceScaleFactor: desktopChromeScale }),
-            },
-            // priority/ lives at the repo root, not under the global testDir
-            // ('./src'), so this project needs its own testDir to find it.
-            testDir: '.',
-            testMatch: ['priority/high/highPrioritySuite.spec.ts'],
+        {
+          name: 'priority-high',
+          use: {
+            ...desktopChromeBase,
+            channel: 'chrome',
+            ...(isHeaded
+              ? { viewport: null, launchOptions: { slowMo: 1200, args: HEADED_CHROMIUM_ARGS } }
+              : { deviceScaleFactor: desktopChromeScale }),
           },
-        ]
+          // priority/ lives at the repo root, not under the global testDir
+          // ('./src'), so this project needs its own testDir to find it.
+          testDir: '.',
+          testMatch: ['priority/high/highPrioritySuite.spec.ts'],
+        },
+      ]
       : []),
     ...(prioritySuite === 'medium' || prioritySuite === 'all'
       ? [
-          {
-            name: 'priority-medium',
-            use: {
-              ...desktopChromeBase,
-              channel: 'chrome',
-              ...(isHeaded
-                ? { viewport: null, launchOptions: { slowMo: 1200, args: HEADED_CHROMIUM_ARGS } }
-                : { deviceScaleFactor: desktopChromeScale }),
-            },
-            // priority/ lives at the repo root, not under the global testDir
-            // ('./src'), so this project needs its own testDir to find it.
-            testDir: '.',
-            testMatch: ['priority/medium/mediumPrioritySuite.spec.ts'],
+        {
+          name: 'priority-medium',
+          use: {
+            ...desktopChromeBase,
+            channel: 'chrome',
+            ...(isHeaded
+              ? { viewport: null, launchOptions: { slowMo: 1200, args: HEADED_CHROMIUM_ARGS } }
+              : { deviceScaleFactor: desktopChromeScale }),
           },
-        ]
+          // priority/ lives at the repo root, not under the global testDir
+          // ('./src'), so this project needs its own testDir to find it.
+          testDir: '.',
+          testMatch: ['priority/medium/mediumPrioritySuite.spec.ts'],
+        },
+      ]
       : []),
     ...(prioritySuite === 'low' || prioritySuite === 'all'
       ? [
-          {
-            name: 'priority-low',
-            use: {
-              ...desktopChromeBase,
-              channel: 'chrome',
-              ...(isHeaded
-                ? { viewport: null, launchOptions: { slowMo: 1200, args: HEADED_CHROMIUM_ARGS } }
-                : { deviceScaleFactor: desktopChromeScale }),
-            },
-            // priority/ lives at the repo root, not under the global testDir
-            // ('./src'), so this project needs its own testDir to find it.
-            testDir: '.',
-            testMatch: ['priority/low/lowPrioritySuite.spec.ts'],
+        {
+          name: 'priority-low',
+          use: {
+            ...desktopChromeBase,
+            channel: 'chrome',
+            ...(isHeaded
+              ? { viewport: null, launchOptions: { slowMo: 1200, args: HEADED_CHROMIUM_ARGS } }
+              : { deviceScaleFactor: desktopChromeScale }),
           },
-        ]
+          // priority/ lives at the repo root, not under the global testDir
+          // ('./src'), so this project needs its own testDir to find it.
+          testDir: '.',
+          testMatch: ['priority/low/lowPrioritySuite.spec.ts'],
+        },
+      ]
       : []),
 
     // ── Visual regression (opt-in via VISUAL=1) ───────────────────────────
     ...(visual
       ? [
-          {
-            name: 'visual',
-            use: {
-              ...devices['Desktop Chrome'],
-              channel: 'chrome',
-              // Disable slowMo for visual captures to avoid timer-driven animations
-              launchOptions: { slowMo: 0 },
-            },
-            testMatch: ['**/visualRegression*'],
+        {
+          name: 'visual',
+          use: {
+            ...devices['Desktop Chrome'],
+            channel: 'chrome',
+            // Disable slowMo for visual captures to avoid timer-driven animations
+            launchOptions: { slowMo: 0 },
           },
-        ]
+          testMatch: ['**/visualRegression*'],
+        },
+      ]
       : []),
   ],
 });

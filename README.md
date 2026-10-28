@@ -28,7 +28,7 @@ Each test carries a unique `@<MODULE>-NN` tag, plus `@smoke` or `@regression`. S
 
 - Playwright Test 1.61 with TypeScript 6.0 (pinned: `typescript-eslint` does not support TypeScript 7 yet)
 - Allure and Playwright HTML reports, plus a custom Excel reporter
-- ESLint 9 (`typescript-eslint`, `eslint-plugin-playwright`) and Prettier, enforced by a Husky pre-push hook and GitHub Actions
+- ESLint 9 (`typescript-eslint`, `eslint-plugin-playwright`, `@stylistic/eslint-plugin` for formatting — no Prettier), enforced by a Husky pre-push hook and GitHub Actions
 - `cross-env` for per-environment runs, `exceljs` for report output
 
 ## Project structure
@@ -46,8 +46,7 @@ src/
 └── tests/
     └── marketplace/   *.spec.ts
 playwright.config.ts   projects, reporters, timeouts
-eslint.config.mjs      lint rules
-.prettierrc.json       formatting rules
+eslint.config.mjs      lint and formatting rules
 .husky/pre-push        runs `npm run verify` before every push
 .github/workflows/     CI: the same checks on every push and pull request
 .env.example           environment template
@@ -161,19 +160,19 @@ An Excel results file is also written to `reports/` after each run. All report o
 ## Code quality: linting, formatting and the pre-push check
 
 ```bash
-npm run verify        # typecheck + lint + format check (what the pre-push hook and CI run)
+npm run verify        # typecheck + lint, formatting included (what the pre-push hook and CI run)
 npm run typecheck     # tsc --noEmit
 npm run lint          # ESLint
 npm run lint:fix      # ESLint with auto-fix
-npm run format        # Prettier, rewrite files
-npm run format:check  # Prettier, check only
+npm run format        # alias of lint:fix (ESLint fixes formatting)
+npm run format:check  # alias of lint
 ```
 
 - **Pre-push hook:** `npm install` sets up Husky automatically (the `prepare` script). Every `git push` then runs `npm run verify` first and is **blocked** if type-checking, linting or formatting fails.
 - **CI:** `.github/workflows/ci.yml` runs the same checks on GitHub for every push and pull request, so they apply even if the local hook is skipped.
-- **Rules:** `typescript-eslint` recommended rules plus `eqeqeq`, `prefer-const`, `no-var`, `interface` over `type` for object shapes, and `import type` for type-only imports. Specs also get `eslint-plugin-playwright`, which blocks `test.only`, invalid titles, element handles and eval.
+- **Rules (all errors):** `typescript-eslint` recommended rules plus no `any`, no unused vars, explicit function return types, no non-null assertions (`!`), `import type` for type-only imports, `interface` over `type` for object shapes, `eqeqeq`, `prefer-const`, `no-var` and no `console.*` (log through `src/utils/logger.ts`). Specs also get `eslint-plugin-playwright`, which blocks `test.only`, invalid titles, element handles and eval.
 - **Warnings don't block.** The remaining warnings are deliberate `waitForTimeout` settle waits for the slow Salesforce sandbox.
-- **Prettier settings:** 2 spaces, single quotes, 120-character lines. `.editorconfig` keeps editors consistent with them.
+- **Formatting (`@stylistic`, replaces Prettier):** 2-space indent, single quotes, semicolons, 120-character lines, trailing commas in multiline structures, arrow-function parens always. `npm run lint:fix` applies them.
 
 ## What is not in the repo
 

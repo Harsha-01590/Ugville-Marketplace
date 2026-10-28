@@ -1,7 +1,7 @@
 {
   "name": "ugville-marketplace-automation",
   "version": "1.0.0",
-  "description": "Ugville Marketplace module — standalone Playwright E2E Test Automation (POM Framework), split out of ugville-automation",
+  "description": "Ugville Marketplace module \u2014 standalone Playwright E2E Test Automation (POM Framework), split out of ugville-automation",
   "main": "index.js",
   "scripts": {
     "test": "npx playwright test",
@@ -24,9 +24,9 @@
     "typecheck": "tsc --noEmit -p .",
     "lint": "eslint src playwright.config.ts eslint.config.mjs",
     "lint:fix": "eslint src playwright.config.ts eslint.config.mjs --fix",
-    "format": "prettier --write .",
-    "format:check": "prettier --check .",
-    "verify": "npm run typecheck && npm run lint && npm run format:check",
+    "format": "npm run lint:fix",
+    "format:check": "npm run lint",
+    "verify": "npm run typecheck && npm run lint",
     "auth:clear": "node -e \"require('fs').rmSync('.auth',{recursive:true,force:true})\"",
     "prepare": "husky"
   },
@@ -44,16 +44,15 @@
   "devDependencies": {
     "@eslint/js": "9.39.5",
     "@playwright/test": "1.61.1",
+    "@stylistic/eslint-plugin": "5.10.0",
     "@types/node": "26.1.1",
     "allure-commandline": "2.43.0",
     "allure-playwright": "3.10.2",
     "cross-env": "10.1.0",
     "eslint": "9.39.5",
-    "eslint-config-prettier": "10.1.8",
     "eslint-plugin-playwright": "2.12.1",
     "exceljs": "4.4.0",
     "husky": "9.1.7",
-    "prettier": "3.9.10",
     "typescript": "6.0.3",
     "typescript-eslint": "8.72.0"
   },

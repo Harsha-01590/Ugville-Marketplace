@@ -1,5 +1,6 @@
 import { type Page, type Locator, expect } from '@playwright/test';
-import { Logger } from '../../../utils/logger';
+import { Logger } from '@utils/logger';
+import { failApexMethod, type ApexFailure } from '@utils/apexFailure';
 
 /** Options inside the combobox / lookup that wraps a given input (relative XPath). */
 const COMBOBOX_ANCESTOR_OPTIONS =
@@ -26,8 +27,6 @@ const ACCORDION_SECTION_ANCESTOR =
 export class BasePage {
   readonly page: Page;
 
-  // ==================== Locators ====================
-
   /** Salesforce Lightning loading spinner. */
   protected readonly spinner: Locator;
   /** Any open SLDS modal / dialog (e.g. the unprompted "Reminders" dialog). */
@@ -53,8 +52,21 @@ export class BasePage {
   /** The whole page body, read as text for page-level error checks. */
   protected readonly pageBody: Locator;
 
+  /** First element showing `text` — for asserting on app messages, banners and toasts from specs. */
+  readonly getMessageText: (text: string | RegExp) => Locator;
+  /** Input located by its `name` attribute. */
+  readonly getNamedInput: (name: string) => Locator;
+  /** Options of the listbox with the given id (resolved from an input's aria-controls). */
+  readonly getListboxOptions: (listboxId: string) => Locator;
+  /** Locator for an accordion summary span by its title attribute */
+  readonly getAccordionSummary: (title: string) => Locator;
+  /** Body container for an accordion, used to scope queries inside that section */
+  readonly getAccordionBody: (title: string) => Locator;
+
   constructor(page: Page) {
     this.page = page;
+    // No data-testid exists in this UI (Salesforce LWR site; confirmed via live inspection of QA on 2026-10-27,
+    // shadow DOM included), so every locator below falls back to role/text/CSS.
     this.spinner = page.locator('lightning-spinner').first();
     this.strayModal = page.locator('.slds-modal, [role="dialog"]').first();
     this.strayModalCloseButton = this.strayModal.getByRole('button', { name: 'Close' }).first();
@@ -71,35 +83,14 @@ export class BasePage {
     this.recentlyVisitedLeadsHeading = page.getByRole('heading', { name: 'Recently Visited Leads', level: 1 });
     this.recentlyVisitedLeadsToggle = page.getByRole('banner').getByText('Recently Visited Leads').first();
     this.pageBody = page.locator('body');
-  }
-
-  /** First element showing `text` — for asserting on app messages, banners and toasts from specs. */
-  messageText(text: string | RegExp): Locator {
-    return this.page.getByText(text).first();
-  }
-
-  /** Input located by its `name` attribute. */
-  protected namedInput(name: string): Locator {
-    return this.page.locator(`input[name="${name}"]`).first();
-  }
-
-  /** Options of the listbox with the given id (resolved from an input's aria-controls). */
-  protected listboxOptions(listboxId: string): Locator {
-    return this.page.locator(`#${listboxId} [role="option"]`);
-  }
-
-  /** Locator for an accordion summary span by its title attribute */
-  accordionSummary(title: string): Locator {
-    return this.page.locator(`span.slds-accordion__summary-content[title="${title}"]`).first();
-  }
-
-  /** Body container for an accordion, used to scope queries inside that section */
-  accordionBody(title: string): Locator {
+    this.getMessageText = (text) => page.getByText(text).first();
+    this.getNamedInput = (name) => page.locator(`input[name="${name}"]`).first();
+    this.getListboxOptions = (listboxId) => page.locator(`#${listboxId} [role="option"]`);
+    this.getAccordionSummary = (title) =>
+      page.locator(`span.slds-accordion__summary-content[title="${title}"]`).first();
     // Walk up from the summary span to the closest accordion section/li
-    return this.accordionSummary(title).locator(ACCORDION_SECTION_ANCESTOR);
+    this.getAccordionBody = (title) => this.getAccordionSummary(title).locator(ACCORDION_SECTION_ANCESTOR);
   }
-
-  // ==================== Spinner Helpers ====================
 
   /** Wait for all Salesforce Lightning spinners to disappear */
   async waitForSpinner(timeout = 20000): Promise<void> {
@@ -165,8 +156,6 @@ export class BasePage {
     }
     return last;
   }
-
-  // ==================== Resilient Click Helpers ====================
 
   /**
    * Click `clickTarget`, then check `guardLocator` to confirm the click worked
@@ -260,8 +249,6 @@ export class BasePage {
     await option.click({ force: true });
   }
 
-  // ==================== Form Helpers ====================
-
   /**
    * Fill a date input (MM/DD/YYYY, `daysAhead` from today) only if it's
    * currently empty — several Salesforce stage forms (Contract, Closing,
@@ -314,7 +301,7 @@ export class BasePage {
 
   /** Reads a date input value by `name` attribute (empty when not rendered). */
   async getNamedDateValue(name: string): Promise<string> {
-    const input = this.namedInput(name);
+    const input = this.getNamedInput(name);
     if ((await input.count()) === 0) return '';
     return ((await input.inputValue().catch(() => '')) || '').trim();
   }
@@ -326,7 +313,7 @@ export class BasePage {
    * "MMM D, YYYY" (Salesforce default for the en-US locale).
    */
   async setNamedDateIfEmpty(name: string, humanLabel: string, daysAhead: number): Promise<string | null> {
-    const input = this.namedInput(name);
+    const input = this.getNamedInput(name);
     try {
       await input.waitFor({ state: 'visible', timeout: 8000 });
     } catch {
@@ -350,8 +337,6 @@ export class BasePage {
     return formatted;
   }
 
-  // ==================== Combobox & Lookup Helpers ====================
-
   /**
    * Opens the dropdown bound to a Salesforce combobox button and returns a
    * locator that ONLY targets the options inside that combobox's listbox.
@@ -368,13 +353,13 @@ export class BasePage {
     if (!listboxId) {
       throw new Error('Combobox button is missing aria-controls; cannot scope options safely');
     }
-    const options = this.listboxOptions(listboxId);
+    const options = this.getListboxOptions(listboxId);
     await expect.poll(async () => options.count(), { timeout: 15000 }).toBeGreaterThan(0);
     return { options, listboxId };
   }
 
   /** Closes a dropdown by pressing Escape. Safe to call even if it's already closed. */
-  async closeDropdown() {
+  async closeDropdown(): Promise<void> {
     await this.page.keyboard.press('Escape').catch(() => {});
   }
 
@@ -394,7 +379,7 @@ export class BasePage {
 
     const listboxId = await input.getAttribute('aria-controls');
     const candidates: Locator[] = [];
-    if (listboxId) candidates.push(this.listboxOptions(listboxId));
+    if (listboxId) candidates.push(this.getListboxOptions(listboxId));
     candidates.push(input.locator(COMBOBOX_ANCESTOR_OPTIONS));
     candidates.push(input.locator(FORM_ELEMENT_ANCESTOR_OPTIONS));
 
@@ -412,7 +397,7 @@ export class BasePage {
     }
     if (!options) {
       throw new Error(
-        `No suggestions appeared after clicking the lookup input. ` + `aria-controls=${listboxId ?? 'none'}.`,
+        'No suggestions appeared after clicking the lookup input. ' + `aria-controls=${listboxId ?? 'none'}.`,
       );
     }
 
@@ -442,7 +427,7 @@ export class BasePage {
     const listboxId = await input.getAttribute('aria-controls');
     const candidateLocators: Locator[] = [];
     if (listboxId) {
-      candidateLocators.push(this.listboxOptions(listboxId));
+      candidateLocators.push(this.getListboxOptions(listboxId));
     }
     // The combobox container that wraps the input
     candidateLocators.push(input.locator(COMBOBOX_ANCESTOR_OPTIONS));
@@ -507,7 +492,7 @@ export class BasePage {
     if (!listboxId) {
       throw new Error('Combobox input is missing aria-controls; cannot scope options safely');
     }
-    const options = this.listboxOptions(listboxId);
+    const options = this.getListboxOptions(listboxId);
     await expect.poll(async () => options.count(), { timeout: 15000 }).toBeGreaterThan(0);
 
     const texts = (await options.allInnerTexts()).map((t) => t.trim());
@@ -568,7 +553,7 @@ export class BasePage {
     throw new Error(`pickComboboxOption(${fieldLabel}): exhausted retries`);
   }
 
-  private async pickComboboxOptionOnce(
+  async pickComboboxOptionOnce(
     comboboxButton: Locator,
     option: string | undefined,
     fieldLabel: string,
@@ -580,7 +565,7 @@ export class BasePage {
     const allTexts = (await options.allInnerTexts()).map((t) => t.trim());
     const indexed = allTexts.map((t, i) => ({ t, i }));
 
-    const findIndex = (predicate: (t: string) => boolean) => indexed.find((o) => predicate(o.t))?.i ?? -1;
+    const findIndex = (predicate: (t: string) => boolean): number => indexed.find((o) => predicate(o.t))?.i ?? -1;
 
     let pickedIndex = -1;
     let pickedText = '';
@@ -627,8 +612,6 @@ export class BasePage {
     return pickedText;
   }
 
-  // ==================== Accordion Helpers ====================
-
   /**
    * Expands an accordion by clicking its title — but only when the section
    * is currently collapsed. SLDS marks an open accordion with the
@@ -636,14 +619,14 @@ export class BasePage {
    * on the summary button). Clicking an already-open section would COLLAPSE
    * it, which is exactly the bug we are guarding against.
    */
-  async expandAccordion(title: string) {
-    const summary = this.accordionSummary(title);
+  async expandAccordion(title: string): Promise<void> {
+    const summary = this.getAccordionSummary(title);
     await summary.waitFor({ state: 'visible', timeout: 30000 });
     await summary.scrollIntoViewIfNeeded();
 
     // Detect "expanded" via the ancestor section's class or the summary
     // button's aria-expanded attribute.
-    const checkOpen = () =>
+    const checkOpen = (): Promise<boolean> =>
       summary
         .evaluate((el) => {
           const section = (el as HTMLElement).closest('.slds-accordion__section, .slds-accordion__list-item, section');
@@ -670,8 +653,6 @@ export class BasePage {
       Logger.info(`  [expandAccordion] "${title}" did not open after click (attempt ${attempt}/2)`);
     }
   }
-
-  // ==================== Validation Error Helpers ====================
 
   /**
    * Returns all visible validation error messages on the page.
@@ -720,7 +701,7 @@ export class BasePage {
    * Useful for negative testing — verifying that empty mandatory fields
    * prevent form submission.
    */
-  async expectValidationErrorVisible() {
+  async expectValidationErrorVisible(): Promise<void> {
     // Wait a moment for any toast to appear
     await this.page.waitForTimeout(2000);
 
@@ -766,8 +747,6 @@ export class BasePage {
     }
   }
 
-  // ==================== Navigation Helpers ====================
-
   /** The whole page's text ('' when unreadable) — for page-level checks such as "no server error shown". */
   async getPageText(): Promise<string> {
     return (await this.pageBody.textContent().catch(() => '')) ?? '';
@@ -786,6 +765,58 @@ export class BasePage {
    * pages and overlap controls we need to click next. If it's open, close it
    * first; if it's already closed, this is a no-op.
    */
+  /** Closes this page's browser tab (e.g. a second tab opened for a stale-view check). */
+  async closeTab(): Promise<void> {
+    await this.page.close();
+  }
+
+  /** Makes every Apex call from this page whose method name matches `method` fail with HTTP 500. */
+  async failApexCalls(method: RegExp): Promise<ApexFailure> {
+    return failApexMethod(this.page, method);
+  }
+
+  /** The full text of the first element showing `text` (e.g. the complete wording around a matched phrase). */
+  async readMessage(text: string | RegExp): Promise<string> {
+    return this.getMessageText(text).innerText();
+  }
+
+  /** True when `text` is currently shown anywhere on the page. */
+  async isMessageShown(text: string | RegExp): Promise<boolean> {
+    return this.getMessageText(text)
+      .isVisible()
+      .catch(() => false);
+  }
+
+  /** Navigates straight to `url` and returns the HTTP status of the document response (undefined if none). */
+  async openUrlAndGetStatus(url: string): Promise<number | undefined> {
+    return (await this.page.goto(url))?.status();
+  }
+
+  /** The browser's Back button. */
+  async goBack(): Promise<void> {
+    await this.page.goBack();
+  }
+
+  /** Asserts the session is intact: the page is not on the login screen. */
+  async expectNotOnLoginPage(): Promise<void> {
+    await expect(this.page).not.toHaveURL(/\/login/);
+  }
+
+  /** The host name of the page's current URL (e.g. "homevestors--qa.sandbox.my.site.com"). */
+  getCurrentHostname(): string {
+    return new URL(this.page.url()).hostname;
+  }
+
+  /** The page's current URL. */
+  getCurrentUrl(): string {
+    return this.page.url();
+  }
+
+  /** Brings this page's window to the front — for two-window flows watched side by side. */
+  async bringToFront(): Promise<void> {
+    await this.page.bringToFront();
+  }
+
   async closeRecentlyVisitedLeadsIfOpen(): Promise<void> {
     const heading = this.recentlyVisitedLeadsHeading;
     const button = this.recentlyVisitedLeadsToggle;

@@ -1,8 +1,19 @@
 import { type Page, type Locator, expect } from '@playwright/test';
-import { BasePage } from '../../../shared/pages/base/BasePage';
-import { Routes } from '../../../enums/routes.enum';
-import { MarketplaceListingComponent } from '../components/MarketplaceListingComponent';
-import type { HomePage } from '../../dashboard';
+import { BasePage } from '@shared/pages/base/BasePage';
+import { Routes } from '@enums/routes.enum';
+import { MarketplaceListingComponent } from '@modules/seller/components/MarketplaceListingComponent';
+import type { HomePage } from '@modules/dashboard';
+import { Logger } from '@utils/logger';
+import { envConfig } from '@config/env.config';
+
+/** A pre-designated unlisted Opportunity for the New Deal form tests, and its expected Location. */
+export interface FormTestFixture {
+  id: string;
+  location: string;
+}
+
+/** The unlisted Opportunity `openUnlistedDealTypeStep()` reuses for the life of the worker. */
+const unlistedFormOp = { fixtureUsable: true, freshId: '' };
 
 type RelatedTab = 'Notes' | 'DA Fee' | 'Fee' | 'Campaigns' | 'Stage Files';
 
@@ -15,8 +26,6 @@ type RelatedTab = 'Notes' | 'DA Fee' | 'Fee' | 'Campaigns' | 'Stage Files';
  */
 export class SellerLeadPage extends BasePage {
   readonly marketplaceListing: MarketplaceListingComponent;
-
-  // ==================== Locators ====================
 
   /**
    * Live-verified: "Account"/"Lead Contact" are plain `<span>` labels with
@@ -155,7 +164,10 @@ export class SellerLeadPage extends BasePage {
   private readonly errorToast: Locator;
   private readonly allToasts: Locator;
   private readonly successToast: Locator;
-  /** The New Seller Opportunity wizard dialog — the page has a second "Next" (table pagination), so fields are scoped to it. */
+  /**
+   * The New Seller Opportunity wizard dialog — the page has a second "Next" (table pagination), so fields are scoped to
+   * it.
+   */
   private readonly newOpportunityWizard: Locator;
   private readonly wizardAccountCombobox: Locator;
   private readonly wizardAdCouncilCombobox: Locator;
@@ -171,8 +183,38 @@ export class SellerLeadPage extends BasePage {
   /** The Street field the chosen address suggestion fills in. */
   private readonly streetInput: Locator;
 
+  /** An option in the New Seller Opportunity wizard's open dropdown. */
+  readonly getWizardOption: (name: string) => Locator;
+  /** Suggestions of the address combobox, by its aria-controls listbox id. */
+  readonly getAddressSuggestions: (listboxId: string | null) => Locator;
+  /** An option of any open dropdown, by exact name. */
+  readonly getDropdownOption: (name: string) => Locator;
+  /** A Details-tab field label; its value renders on the next line of the label's parent. */
+  readonly getDetailFieldLabel: (label: string) => Locator;
+  /** The element holding a Details-tab field's label and value. */
+  readonly getDetailFieldContainer: (label: string) => Locator;
+  /** An opt-out checkbox on the Lead Contact's Edit form. */
+  readonly getContactOptOutCheckbox: (field: string) => Locator;
+  /** The visible label of a field — the first matching label is a hidden copy. */
+  readonly getVisibleFieldLabel: (field: string) => Locator;
+  /** "<field> True" once a checkbox field has been saved as ticked. */
+  readonly getSavedTrueField: (field: string) => Locator;
+  /** A Sub Stage radio's label on the Stage Wizard. */
+  readonly getSubStageOption: (subStage: string) => Locator;
+  /**
+   * Live-verified (2026-08-11): "Notes"/"DA Fee"/"Fee"/"Campaigns"/"Stage
+   * Files" are not tabs — the Related tabpanel renders them as stacked
+   * `<article>` sections (plain headings), all present at once once
+   * "Related" itself is active. "Stage Files" in particular renders under a
+   * "Files" heading, not "Stage Files". `getByRole('tab', ...)` never
+   * matches any of them, so this now targets the section heading instead.
+   */
+  readonly getRelatedTab: (name: RelatedTab) => Locator;
+
   constructor(page: Page) {
     super(page);
+    // No data-testid exists in this UI (Salesforce LWR site; confirmed via live inspection of QA on 2026-10-27,
+    // shadow DOM included), so every locator below falls back to role/text/CSS.
     this.marketplaceListing = new MarketplaceListingComponent(page);
     this.accountLink = page.getByText('Account', { exact: true }).locator('..').getByRole('link').first();
     this.contactLink = page.getByText('Lead Contact', { exact: true }).locator('..').getByRole('link').first();
@@ -244,75 +286,74 @@ export class SellerLeadPage extends BasePage {
     this.wizardArvInput = this.newOpportunityWizard.getByRole('spinbutton', { name: 'ARV', exact: true });
     this.wizardFinishButton = this.newOpportunityWizard.getByRole('button', { name: 'Finish' });
     this.streetInput = page.getByRole('textbox', { name: 'Street' });
+    this.getWizardOption = (name) => this.newOpportunityWizard.getByRole('option', { name });
+    this.getAddressSuggestions = (listboxId) => page.locator(`[id="${listboxId}"] [role="option"]`);
+    this.getDropdownOption = (name) => page.getByRole('option', { name, exact: true });
+    this.getDetailFieldLabel = (label) => page.getByText(label, { exact: true }).first();
+    this.getDetailFieldContainer = (label) => this.getDetailFieldLabel(label).locator('xpath=..');
+    this.getContactOptOutCheckbox = (field) => page.getByRole('checkbox', { name: field, exact: true }).first();
+    this.getVisibleFieldLabel = (field) =>
+      page
+        .locator('label:visible')
+        .filter({ hasText: new RegExp(`^${field}$`) })
+        .first();
+    this.getSavedTrueField = (field) => page.getByText(new RegExp(`${field}\\s*True`)).first();
+    this.getSubStageOption = (subStage) => page.getByText(subStage, { exact: true }).first();
+    this.getRelatedTab = (name) =>
+      page.getByRole('heading', { name: name === 'Stage Files' ? 'Files' : name, exact: true });
+  }
+
+  /** Salesforce record id from the current Opportunity URL ('' if none). */
+  getOpportunityIdFromUrl(): string {
+    return this.page.url().match(/\/opportunity\/([A-Za-z0-9]{15,18})/)?.[1] ?? '';
+  }
+
+  /** Opens a record from a link's href (e.g. a deal's source Opportunity link). */
+  async openFromHref(href: string): Promise<void> {
+    await this.page.goto(href);
+    await this.page.waitForLoadState('domcontentloaded');
   }
 
   /**
-   * Live-verified (2026-08-11): "Notes"/"DA Fee"/"Fee"/"Campaigns"/"Stage
-   * Files" are not tabs — the Related tabpanel renders them as stacked
-   * `<article>` sections (plain headings), all present at once once
-   * "Related" itself is active. "Stage Files" in particular renders under a
-   * "Files" heading, not "Stage Files". `getByRole('tab', ...)` never
-   * matches any of them, so this now targets the section heading instead.
+   * Opens a still-unlisted Opportunity's "New Deal" dialog at step 1 (deal type) and returns its
+   * expected Location ('' when not known up front). Uses the configured form-test fixture while it
+   * is unlisted, otherwise one fresh seller op per worker — callers only ever cancel, so it stays
+   * unlisted and serves them all.
    */
-  relatedTab(name: RelatedTab): Locator {
-    const headingText = name === 'Stage Files' ? 'Files' : name;
-    return this.page.getByRole('heading', { name: headingText, exact: true });
+  async openUnlistedDealTypeStep(home: HomePage, fixture: FormTestFixture): Promise<string> {
+    if (fixture.id && unlistedFormOp.fixtureUsable) {
+      await this.navigateById(fixture.id);
+      // Seen QA 2026-10-11: the fixture record is gone ("requested resource does not exist") — stop trying it.
+      if ((await this.isRecordShown()) && (await this.isListInMarketplaceCtaShown())) {
+        await this.clickMarketplaceCta();
+        return fixture.location;
+      }
+      unlistedFormOp.fixtureUsable = false;
+    }
+    if (unlistedFormOp.freshId) await this.navigateById(unlistedFormOp.freshId);
+    else {
+      await this.createFromHome(home, envConfig.FRANCHISE_A_NAME);
+      unlistedFormOp.freshId = this.getOpportunityIdFromUrl();
+    }
+    expect(await this.isListInMarketplaceCtaShown(), 'seller op offers "List in Marketplace"').toBe(true);
+    await this.clickMarketplaceCta();
+    return '';
   }
 
-  /** An option in the New Seller Opportunity wizard's open dropdown. */
-  private wizardOption(name: string): Locator {
-    return this.newOpportunityWizard.getByRole('option', { name });
+  /** `openUnlistedDealTypeStep()`, then straight on to step 2 (deal details) as Assignment. */
+  async openUnlistedDealForm(home: HomePage, fixture: FormTestFixture): Promise<string> {
+    const location = await this.openUnlistedDealTypeStep(home, fixture);
+    await this.marketplaceListing.selectDealType('Assignment');
+    return location;
   }
 
-  /** Suggestions of the address combobox, by its aria-controls listbox id. */
-  private addressSuggestions(listboxId: string | null): Locator {
-    return this.page.locator(`[id="${listboxId}"] [role="option"]`);
-  }
-
-  /** An option of any open dropdown, by exact name. */
-  private dropdownOption(name: string): Locator {
-    return this.page.getByRole('option', { name, exact: true });
-  }
-
-  /** A Details-tab field label; its value renders on the next line of the label's parent. */
-  private detailFieldLabel(label: string): Locator {
-    return this.page.getByText(label, { exact: true }).first();
-  }
-
-  /** An opt-out checkbox on the Lead Contact's Edit form. */
-  private contactOptOutCheckbox(field: string): Locator {
-    return this.page.getByRole('checkbox', { name: field, exact: true }).first();
-  }
-
-  /** The visible label of a field — the first matching label is a hidden copy. */
-  private visibleFieldLabel(field: string): Locator {
-    return this.page
-      .locator('label:visible')
-      .filter({ hasText: new RegExp(`^${field}$`) })
-      .first();
-  }
-
-  /** "<field> True" once a checkbox field has been saved as ticked. */
-  private savedTrueField(field: string): Locator {
-    return this.page.getByText(new RegExp(`${field}\\s*True`)).first();
-  }
-
-  /** A Sub Stage radio's label on the Stage Wizard. */
-  private subStageOption(subStage: string): Locator {
-    return this.page.getByText(subStage, { exact: true }).first();
-  }
-
-  // ==================== Navigation ====================
-
-  async navigateById(opportunityId: string) {
+  async navigateById(opportunityId: string): Promise<void> {
     await this.page.goto(`${Routes.OPPORTUNITY_DETAIL}/${opportunityId}`);
     await this.page.waitForLoadState('domcontentloaded');
     await this.waitForSpinner(25000);
   }
 
-  // ==================== Quick Action Actions ====================
-
-  async ensureActivitiesTabActive() {
+  async ensureActivitiesTabActive(): Promise<void> {
     const selected = await this.activitiesRecordTab.getAttribute('aria-selected').catch(() => null);
     if (selected !== 'true') {
       await this.activitiesRecordTab.click();
@@ -320,7 +361,7 @@ export class SellerLeadPage extends BasePage {
     }
   }
 
-  async ensureRelatedTabActive() {
+  async ensureRelatedTabActive(): Promise<void> {
     const selected = await this.relatedRecordTab.getAttribute('aria-selected').catch(() => null);
     if (selected !== 'true') {
       await this.relatedRecordTab.click();
@@ -331,8 +372,6 @@ export class SellerLeadPage extends BasePage {
   async hasNoWizardForRecordType(): Promise<boolean> {
     return this.noWizardMessage.isVisible().catch(() => false);
   }
-
-  // ==================== Actions ====================
 
   /**
    * Follows the header's "Account" hyperlink to the CRM Account record.
@@ -345,23 +384,23 @@ export class SellerLeadPage extends BasePage {
    * Opportunity). Letting Playwright wait for actionability, then waiting on
    * the account route, makes the navigation deterministic.
    */
-  async clickAccountLink() {
+  async clickAccountLink(): Promise<void> {
     await this.accountLink.click();
     await this.page.waitForURL(/\/crm\/account\//, { timeout: 20000 });
     await this.waitForStabilization();
   }
 
-  async clickContactLink() {
+  async clickContactLink(): Promise<void> {
     await this.contactLink.click({ force: true });
     await this.waitForStabilization();
   }
 
-  async clickPropertyAddressLink() {
+  async clickPropertyAddressLink(): Promise<void> {
     await this.propertyAddressLink.click({ force: true });
     await this.waitForStabilization();
   }
 
-  async clickLogACall(subject: string) {
+  async clickLogACall(subject: string): Promise<void> {
     await this.ensureActivitiesTabActive();
     await this.logACallButton.click();
     await this.page.waitForTimeout(1000);
@@ -370,7 +409,7 @@ export class SellerLeadPage extends BasePage {
     await this.waitForStabilization();
   }
 
-  async clickSendEmail(subject: string) {
+  async clickSendEmail(subject: string): Promise<void> {
     await this.ensureActivitiesTabActive();
     // "Email" overflows the visible tab strip into a "More Tabs" menu.
     await this.moreTabsButton.click();
@@ -382,7 +421,7 @@ export class SellerLeadPage extends BasePage {
     await this.waitForStabilization();
   }
 
-  async clickNewTask(subject: string) {
+  async clickNewTask(subject: string): Promise<void> {
     await this.ensureActivitiesTabActive();
     await this.newTaskButton.click();
     await this.page.waitForTimeout(1000);
@@ -391,28 +430,37 @@ export class SellerLeadPage extends BasePage {
     await this.waitForStabilization();
   }
 
-  /** No standalone "Call" quick action exists on a Seller Lead (live-verified 2026-08-11) — logs the absence instead of hard-failing. */
-  async clickCallQuickAction() {
+  /**
+   * No standalone "Call" quick action exists on a Seller Lead (live-verified 2026-08-11) — logs the absence instead of
+   * hard-failing.
+   */
+  async clickCallQuickAction(): Promise<void> {
     const available = (await this.callQuickAction.count()) > 0;
-    console.log(`  [SellerLead] Call quick action available = ${available}`);
+    Logger.info(`  [SellerLead] Call quick action available = ${available}`);
     if (!available) return;
     await this.callQuickAction.click({ force: true });
     await this.page.waitForTimeout(1000);
   }
 
-  /** No standalone "SMS" quick action exists on a Seller Lead (live-verified 2026-08-11) — logs the absence instead of hard-failing. */
-  async clickSmsQuickAction() {
+  /**
+   * No standalone "SMS" quick action exists on a Seller Lead (live-verified 2026-08-11) — logs the absence instead of
+   * hard-failing.
+   */
+  async clickSmsQuickAction(): Promise<void> {
     const available = (await this.smsQuickAction.count()) > 0;
-    console.log(`  [SellerLead] SMS quick action available = ${available}`);
+    Logger.info(`  [SellerLead] SMS quick action available = ${available}`);
     if (!available) return;
     await this.smsQuickAction.click({ force: true });
     await this.page.waitForTimeout(1000);
   }
 
-  /** Related sub-sections are stacked headings, not tabs — all render at once once "Related" itself is active, so this just ensures that and scrolls the target section into view. */
-  async openRelatedTab(name: RelatedTab) {
+  /**
+   * Related sub-sections are stacked headings, not tabs — all render at once once "Related" itself is active, so this
+   * just ensures that and scrolls the target section into view.
+   */
+  async openRelatedTab(name: RelatedTab): Promise<void> {
     await this.ensureRelatedTabActive();
-    await this.relatedTab(name).scrollIntoViewIfNeeded();
+    await this.getRelatedTab(name).scrollIntoViewIfNeeded();
     await this.page.waitForTimeout(1000);
   }
 
@@ -420,7 +468,7 @@ export class SellerLeadPage extends BasePage {
     return this.timelineItems.count();
   }
 
-  async openTimelineItem(index = 0) {
+  async openTimelineItem(index = 0): Promise<void> {
     await this.timelineItems.nth(index).click({ force: true });
     await this.page.waitForTimeout(1500);
   }
@@ -430,17 +478,20 @@ export class SellerLeadPage extends BasePage {
     return texts.map((t) => t.match(/\b\d{1,2}:\d{2}\s?(AM|PM)\b/i)?.[0]).filter((t): t is string => !!t);
   }
 
-  /** No usable "Assigned To" field exists on a Seller Lead's own chrome (live-verified 2026-08-11) — logs the absence instead of hard-failing. */
-  async assignFranchiseCoordinator(name: string) {
+  /**
+   * No usable "Assigned To" field exists on a Seller Lead's own chrome (live-verified 2026-08-11) — logs the absence
+   * instead of hard-failing.
+   */
+  async assignFranchiseCoordinator(name: string): Promise<void> {
     const available = await this.assignedToLookup.isVisible().catch(() => false);
-    console.log(
+    Logger.info(
       `  [SellerLead] Assigned To field available = ${available} (coordinator "${name}" not applicable if absent)`,
     );
     if (!available) return;
     await this.searchLookupAndPickFirst(this.assignedToLookup, name);
   }
 
-  async uploadStageFile(filePath: string) {
+  async uploadStageFile(filePath: string): Promise<void> {
     await this.uploadDocumentButton.click({ force: true });
     await this.fileInput.setInputFiles(filePath);
     await this.page.waitForTimeout(2000);
@@ -450,19 +501,17 @@ export class SellerLeadPage extends BasePage {
     return this.uploadDocumentButton.isVisible().catch(() => false);
   }
 
-  // ==================== Record Header Action Actions ====================
-
-  async openUpdateOwnerDialog() {
+  async openUpdateOwnerDialog(): Promise<void> {
     await this.updateOwnerButton.click();
     await this.ownerCombobox.waitFor({ state: 'visible', timeout: 15000 });
   }
 
-  async openChangeToAssignmentDialog() {
+  async openChangeToAssignmentDialog(): Promise<void> {
     await this.changeToAssignmentButton.click();
     await this.assignmentSoldToCombobox.waitFor({ state: 'visible', timeout: 15000 });
   }
 
-  async cancelRecordActionDialog() {
+  async cancelRecordActionDialog(): Promise<void> {
     await this.dialogCancelButton.click();
     await this.recordActionDialog.waitFor({ state: 'hidden', timeout: 10000 }).catch(() => {});
   }
@@ -490,8 +539,11 @@ export class SellerLeadPage extends BasePage {
     return owner && notify;
   }
 
-  /** Re-submits the current owner unchanged — exercises the save path without reassigning a shared QA record to a different owner. */
-  async submitUpdateOwnerUnchanged() {
+  /**
+   * Re-submits the current owner unchanged — exercises the save path without reassigning a shared QA record to a
+   * different owner.
+   */
+  async submitUpdateOwnerUnchanged(): Promise<void> {
     await this.updateOwnerSubmitButton.click();
     await this.recordActionDialog.waitFor({ state: 'hidden', timeout: 15000 }).catch(() => {});
   }
@@ -503,18 +555,21 @@ export class SellerLeadPage extends BasePage {
     return soldTo && value && save;
   }
 
-  // ==================== Marketplace listing Actions ====================
-
   /** The exact rendered CTA text — "List in Marketplace" means this Opportunity has no deal yet. */
   async getMarketplaceCtaText(): Promise<string> {
     return ((await this.marketplaceCtaButton.textContent().catch(() => '')) || '').trim();
   }
 
-  async hasMarketplaceCta(): Promise<boolean> {
+  /** `timeout` > 0 waits up to that long for a late-rendering CTA instead of checking once. */
+  async hasMarketplaceCta(timeout = 0): Promise<boolean> {
+    if (timeout > 0) return this.isEventuallyVisible(this.marketplaceCtaButton, timeout);
     return this.marketplaceCtaButton.isVisible().catch(() => false);
   }
 
-  /** True only while this Opportunity is still un-listed — the only state the "New Deal" flow (`this.marketplaceListing`) can be (re-)opened from. */
+  /**
+   * True only while this Opportunity is still un-listed — the only state the "New Deal" flow
+   * (`this.marketplaceListing`) can be (re-)opened from.
+   */
   async isListInMarketplaceCtaShown(): Promise<boolean> {
     return (await this.getMarketplaceCtaText()) === 'List in Marketplace';
   }
@@ -546,12 +601,12 @@ export class SellerLeadPage extends BasePage {
       await this.marketplaceCtaButton.waitFor({ state: 'visible', timeout: 20000 }).catch(() => {});
       if (!(await this.isListInMarketplaceCtaShown())) continue;
       if (await this.isCorpDeal()) {
-        console.log(`  [SellerLead] skipping corp deal "${name}"`);
+        Logger.info(`  [SellerLead] skipping corp deal "${name}"`);
         continue;
       }
       await this.stageWizardTab.click();
       await this.marketplaceCtaButton.waitFor({ state: 'visible', timeout: 20000 });
-      console.log(`  [SellerLead] picked listable seller op "${name}"`);
+      Logger.info(`  [SellerLead] picked listable seller op "${name}"`);
       return name;
     }
     return '';
@@ -576,9 +631,9 @@ export class SellerLeadPage extends BasePage {
     const account = this.wizardAccountCombobox;
     await account.click();
     await account.pressSequentially(accountName.split(/[\s,]/)[0], { delay: 80 });
-    await this.wizardOption(accountName).click();
+    await this.getWizardOption(accountName).click();
     await this.wizardAdCouncilCombobox.click();
-    await this.wizardOption(adCouncil).click();
+    await this.getWizardOption(adCouncil).click();
 
     const n = Math.floor(1000 + Math.random() * 9000);
     const phone = `${6 + Math.floor(Math.random() * 4)}${String(Math.floor(Math.random() * 1e5)).padStart(5, '0')}0000`;
@@ -657,7 +712,7 @@ export class SellerLeadPage extends BasePage {
       await address.fill('');
       await address.pressSequentially(String(10 + Math.floor(Math.random() * 990)), { delay: 80 });
       const listboxId = await address.getAttribute('aria-controls');
-      const options = this.addressSuggestions(listboxId);
+      const options = this.getAddressSuggestions(listboxId);
       await options.first().waitFor({ state: 'visible', timeout: 15000 });
       const texts = (await options.allInnerTexts()).map((t) => t.trim());
       const numbered = texts.map((_, i) => i).filter((i) => /^\d/.test(texts[i]));
@@ -678,14 +733,14 @@ export class SellerLeadPage extends BasePage {
     return this.finishCreateWizard(accountName);
   }
 
-  private async finishCreateWizard(accountName: string): Promise<string> {
+  async finishCreateWizard(accountName: string): Promise<string> {
     await this.wizardFinishButton.click();
     // Lands on ".../crm/opportunity/<id>/<slug>", possibly via a transient ".../<id>/detail".
     await this.page.waitForURL(/\/crm\/opportunity\/[^/]+\/(?!detail\/?$)[^/]+\/?$/, { timeout: 60000 });
     await this.waitForSpinner(25000);
     await this.marketplaceCtaButton.waitFor({ state: 'visible', timeout: 30000 });
     const name = decodeURIComponent(new URL(this.page.url()).pathname.split('/').pop() ?? '');
-    console.log(`  [SellerLead] created seller op "${name}" for ${accountName}`);
+    Logger.info(`  [SellerLead] created seller op "${name}" for ${accountName}`);
     return name;
   }
 
@@ -695,9 +750,9 @@ export class SellerLeadPage extends BasePage {
    */
   async getDetailField(label: string): Promise<string> {
     await this.detailsTab.click();
-    const field = this.detailFieldLabel(label);
+    const field = this.getDetailFieldLabel(label);
     await field.waitFor({ state: 'visible', timeout: 15000 });
-    const text = await field.locator('xpath=..').innerText();
+    const text = await this.getDetailFieldContainer(label).innerText();
     return text.replace(label, '').trim().split('\n')[0].trim();
   }
 
@@ -715,7 +770,7 @@ export class SellerLeadPage extends BasePage {
   }
 
   /** Opens the "New Deal" dialog — see `this.marketplaceListing` for the dialog itself. */
-  async clickMarketplaceCta() {
+  async clickMarketplaceCta(): Promise<void> {
     await this.marketplaceCtaButton.click();
     await this.marketplaceListing.waitForDealTypeStep();
   }
@@ -741,21 +796,21 @@ export class SellerLeadPage extends BasePage {
    * and saves, then comes back to the Opportunity (live-verified QA 2026-10-11: both are
    * editable by the Owner; the read-only SMS flags are not).
    */
-  async setContactOptOut(field: 'Do Not Call' | 'Email Opt Out') {
+  async setContactOptOut(field: 'Do Not Call' | 'Email Opt Out'): Promise<void> {
     const oppUrl = this.page.url();
     await this.clickContactLink();
     await this.editButton.click();
-    const box = this.contactOptOutCheckbox(field);
+    const box = this.getContactOptOutCheckbox(field);
     await box.waitFor({ state: 'attached', timeout: 15000 });
     if (!(await box.isChecked())) {
       // The first matching label is a hidden copy; click the visible one, else tick the input itself.
-      await this.visibleFieldLabel(field)
+      await this.getVisibleFieldLabel(field)
         .click({ timeout: 5000 })
         .catch(() => box.check({ force: true }));
     }
     await expect(box, `${field} ticked`).toBeChecked({ timeout: 5000 });
     await this.saveButton.click();
-    await this.savedTrueField(field)
+    await this.getSavedTrueField(field)
       .waitFor({ state: 'visible', timeout: 20000 })
       .catch(() => {});
     await this.page.goto(oppUrl);
@@ -763,7 +818,7 @@ export class SellerLeadPage extends BasePage {
   }
 
   /** Closed Lost with Sub Stage "Do Not Contact" (needs a Loss Reason and a reason for not meeting). */
-  async closeLostDoNotContact() {
+  async closeLostDoNotContact(): Promise<void> {
     // QA 2026-10-26: the record opens on Details, and Closed Lost's Sub Stage options render only on Stage Wizard.
     await this.stageWizardTab.click();
     await this.waitForSpinner();
@@ -776,7 +831,7 @@ export class SellerLeadPage extends BasePage {
     await this.doNotContactLabel.click();
     await this.lossReasonCombobox.click();
     // Not "Take Me Off List": since QA 2026-10-26 saving it sends the user off to a webform.
-    await this.dropdownOption('Not a Fit').click();
+    await this.getDropdownOption('Not a Fit').click();
     await this.didNotMeetSellerOption.click();
     await this.reasonForNotMeetingInput.fill('Seller asked not to be contacted');
     await this.saveButton.click();
@@ -784,7 +839,7 @@ export class SellerLeadPage extends BasePage {
   }
 
   /** Clicks the rendered "List in Marketplace" CTA without waiting for any particular outcome. */
-  async clickListInMarketplace() {
+  async clickListInMarketplace(): Promise<void> {
     await this.listInMarketplaceText.click();
   }
 
@@ -812,12 +867,12 @@ export class SellerLeadPage extends BasePage {
   }
 
   /** Stage Wizard: picks a Sub Stage radio and saves (live-verified QA 2026-10-11: "Success" toast, value persists). */
-  async setSubStage(subStage: string) {
+  async setSubStage(subStage: string): Promise<void> {
     await this.stageWizardTab.click();
     await this.waitForSpinner();
     // Seen QA 2026-10-11: a header hover card (Phone / Billing Address) left open by the pointer covers the options.
     await this.page.mouse.move(0, 0);
-    await this.subStageOption(subStage).click();
+    await this.getSubStageOption(subStage).click();
     await this.saveButton.click();
     await this.successToast.waitFor({ state: 'visible', timeout: 20000 });
     await this.waitForStabilization(2000);
@@ -832,7 +887,9 @@ export class SellerLeadPage extends BasePage {
     );
   }
 
-  /** True when the opened record actually renders (its Account link shows) — false for a record this user can't access. */
+  /**
+   * True when the opened record actually renders (its Account link shows) — false for a record this user can't access.
+   */
   async isRecordShown(): Promise<boolean> {
     return this.accountLink.waitFor({ state: 'visible', timeout: 15000 }).then(
       () => true,
@@ -840,23 +897,26 @@ export class SellerLeadPage extends BasePage {
     );
   }
 
-  // ==================== Assertions ====================
-
-  async expectRecordHeaderVisible() {
+  async expectRecordHeaderVisible(): Promise<void> {
     await this.waitForSpinner(20000);
-    console.log(`  [SellerLead] Account link visible = ${await this.accountLink.isVisible().catch(() => false)}`);
+    Logger.info(`  [SellerLead] Account link visible = ${await this.accountLink.isVisible().catch(() => false)}`);
   }
 
-  async expectStageHistoryVisible() {
+  async expectStageHistoryVisible(): Promise<void> {
     const visible = await this.stageHistorySection.isVisible().catch(() => false);
-    console.log(`  [SellerLead] Stage History section visible = ${visible}`);
+    Logger.info(`  [SellerLead] Stage History section visible = ${visible}`);
   }
 
   /** No timestamp in the Timeline should carry a leading zero (e.g. "9:05 AM", not "09:05 AM"). */
-  async expectNoLeadingZeroTimestamps() {
+  async expectNoLeadingZeroTimestamps(): Promise<void> {
     const timestamps = await this.getTimelineTimestamps();
     for (const ts of timestamps) {
       expect(ts, `Timestamp "${ts}" should not have a leading zero`).not.toMatch(/^0\d:/);
     }
   }
+}
+
+/** A different Sub Stage to switch an Opportunity to from `current`, for checking the change sticks. */
+export function alternateSubStage(current: string): string {
+  return current === 'Contacted, No Appointment Set' ? 'Attempting To Contact' : 'Contacted, No Appointment Set';
 }

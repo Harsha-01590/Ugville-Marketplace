@@ -1,16 +1,16 @@
-import { test, expect } from '../../fixtures/testFixtures';
-import type { Page } from '@playwright/test';
-import type { HomePage } from '../../modules/dashboard';
-import type { TestData } from '../../fixtures/testFixtures';
-import { envConfig } from '../../config/env.config';
-import { listWithDirectInvite, openDealAs, placeBidAs, type DirectInviteDeal } from '../../utils/directInvite';
-import { tileWindow } from '../../utils/windowLayout';
-import type {
-  MarketplacePage,
-  MarketplaceDealPage,
-  MarketplaceDealStage,
-  MarketplaceBidStage,
-} from '../../modules/marketplace';
+import { test, expect } from '@fixtures/testFixtures';
+import { envConfig } from '@config/env.config';
+import {
+  listFreshDeal,
+  openBidDealUnderStage,
+  openDealAs,
+  openListedDealUnderStage,
+  placeBidAs,
+} from '@utils/directInvite';
+import { dealsShowingGoogleImage } from '@utils/dealScan';
+import { franchiseBaseName } from '@modules/seller';
+import { tileWindow } from '@utils/windowLayout';
+import { Logger } from '@utils/logger';
 
 /** Franchise A's owner also owns this franchise. */
 const SECOND_FRANCHISE_ACCOUNT = envConfig.FRANCHISE_A_OTHER_NAME;
@@ -72,16 +72,6 @@ const SECOND_FRANCHISE_ACCOUNT = envConfig.FRANCHISE_A_OTHER_NAME;
  * scope notes now live in 03-dealListingForm.regression.spec.ts.
  */
 
-async function resetToHome(authedPage: Page, authedHomePage: HomePage, data: TestData) {
-  await authedHomePage.navigate();
-  await authedPage.waitForLoadState('domcontentloaded');
-  await authedPage.waitForTimeout(data.timeouts.settle);
-}
-
-async function settleAfter(authedPage: Page, data: TestData) {
-  await authedPage.waitForTimeout(data.timeouts.afterEach);
-}
-
 test.describe('Deal Card & Deal Detail View @regression @MarketplaceDealCardDealDetailView', () => {
   // =====================================================================
   // Deal Card - Days Label (DL_001-007)
@@ -91,9 +81,9 @@ test.describe('Deal Card & Deal Detail View @regression @MarketplaceDealCardDeal
   test(
     'Last Activity / Opp Age / Listing Age follow the days-label rules @regression',
     { tag: '@CARD-01' },
-    async ({ authedPage, data, authedHomePage, authedMarketplacePage }) => {
+    async ({ authedHomePage, authedMarketplacePage }) => {
       const count = await test.step('Open the Marketplace', async () => {
-        await resetToHome(authedPage, authedHomePage, data);
+        await authedHomePage.openAndSettle();
         await authedMarketplacePage.navigate();
         await authedMarketplacePage.expectMarketplaceLoaded();
         return authedMarketplacePage.getDealCardCount();
@@ -102,14 +92,8 @@ test.describe('Deal Card & Deal Detail View @regression @MarketplaceDealCardDeal
       test.skip(count === 0, 'No deal cards in current sandbox state');
 
       const fields = await test.step('Read Last Activity / Opp Age / Listing Age from every card', async () => {
-        const read = await Promise.all(
-          Array.from({ length: count }, async (_, i) => ({
-            lastActivity: await authedMarketplacePage.getCardLastActivity(i),
-            oppAge: await authedMarketplacePage.getCardOppAge(i),
-            listingAge: await authedMarketplacePage.getCardListingAge(i),
-          })),
-        );
-        console.log(`${JSON.stringify(read)}`);
+        const read = await authedMarketplacePage.getCardDayFields();
+        Logger.log(`${JSON.stringify(read)}`);
         return read;
       });
 
@@ -118,16 +102,16 @@ test.describe('Deal Card & Deal Detail View @regression @MarketplaceDealCardDeal
           // DL_001/DL_002/DL_003: a "day(s)" label alongside a real value.
           // DL_004: whole numbers only. DL_006/DL_007: "0 days" / "1 day" singular.
           // DL_005: no "day(s)" label tacked onto an N/A value.
+          // App behaviour (QA 2026-10-21/26): a Last Activity dated in the future (a booked
+          // appointment) shows as a bare negative count, e.g. "Last Activity: -2", with no label.
+          expect(lastActivity).toMatch(/:\s*(N\/A|\d+ days?|-\d+)$/);
+          expect(oppAge).toMatch(/:\s*(N\/A|\d+ days?)$/);
+          expect(listingAge).toMatch(/:\s*(N\/A|\d+ days?)$/);
           for (const field of [lastActivity, oppAge, listingAge]) {
-            // App behaviour (QA 2026-10-21/26): a Last Activity dated in the future (a booked
-            // appointment) shows as a bare negative count, e.g. "Last Activity: -2", with no label.
-            expect(field).toMatch(field === lastActivity ? /:\s*(N\/A|\d+ days?|-\d+)$/ : /:\s*(N\/A|\d+ days?)$/);
             expect(field, 'value of 1 must use the singular "1 day"').not.toMatch(/(?<!\d)1 days$/);
           }
         }
       });
-
-      await settleAfter(authedPage, data);
     },
   );
 
@@ -139,9 +123,9 @@ test.describe('Deal Card & Deal Detail View @regression @MarketplaceDealCardDeal
   test(
     'Deal card fields use "N/A" rather than "NA" for missing values @regression',
     { tag: '@CARD-02' },
-    async ({ authedPage, data, authedHomePage, authedMarketplacePage }) => {
+    async ({ authedHomePage, authedMarketplacePage }) => {
       const count = await test.step('Open the Marketplace', async () => {
-        await resetToHome(authedPage, authedHomePage, data);
+        await authedHomePage.openAndSettle();
         await authedMarketplacePage.navigate();
         await authedMarketplacePage.expectMarketplaceLoaded();
         return authedMarketplacePage.getDealCardCount();
@@ -151,18 +135,11 @@ test.describe('Deal Card & Deal Detail View @regression @MarketplaceDealCardDeal
 
       await test.step('Verify no card field reads a bare "NA"', async () => {
         for (let i = 0; i < count; i++) {
-          const estArv = await authedMarketplacePage.getCardEstArv(i);
-          const lastActivity = await authedMarketplacePage.getCardLastActivity(i);
-          const oppAge = await authedMarketplacePage.getCardOppAge(i);
-          const listingAge = await authedMarketplacePage.getCardListingAge(i);
-          for (const field of [estArv, lastActivity, oppAge, listingAge]) {
+          for (const field of await authedMarketplacePage.getCardValueFields(i)) {
             expect(field).not.toMatch(/:\s*NA\s*$/);
-            if (field.includes('N/A')) expect(field).toMatch(/N\/A/);
           }
         }
       });
-
-      await settleAfter(authedPage, data);
     },
   );
 
@@ -172,9 +149,9 @@ test.describe('Deal Card & Deal Detail View @regression @MarketplaceDealCardDeal
   test(
     'Deal cards that carry a deal-type badge show non-empty text @regression',
     { tag: '@CARD-03' },
-    async ({ authedPage, data, authedHomePage, authedMarketplacePage }) => {
+    async ({ authedHomePage, authedMarketplacePage }) => {
       const count = await test.step('Open the Marketplace', async () => {
-        await resetToHome(authedPage, authedHomePage, data);
+        await authedHomePage.openAndSettle();
         await authedMarketplacePage.navigate();
         await authedMarketplacePage.expectMarketplaceLoaded();
         return authedMarketplacePage.getDealCardCount();
@@ -183,15 +160,13 @@ test.describe('Deal Card & Deal Detail View @regression @MarketplaceDealCardDeal
       test.skip(count === 0, 'No deal cards in current sandbox state');
 
       await test.step('Verify every deal-type badge has text', async () => {
-        console.log('Reading deal type badges from cards');
+        Logger.log('Reading deal type badges from cards');
         const labels = await authedMarketplacePage.getDealTypeLabels();
-        console.log(`Deal type badges found = ${JSON.stringify(labels)}`);
+        Logger.log(`Deal type badges found = ${JSON.stringify(labels)}`);
         for (const label of labels) {
-          expect(label.trim().length).toBeGreaterThan(0);
+          expect(label, 'badge has text').toMatch(/\S/);
         }
       });
-
-      await settleAfter(authedPage, data);
     },
   );
 
@@ -199,9 +174,9 @@ test.describe('Deal Card & Deal Detail View @regression @MarketplaceDealCardDeal
   test(
     'Deal detail\'s additional fields use "N/A" and MM/DD/YYYY dates @regression',
     { tag: '@CARD-04' },
-    async ({ authedPage, data, authedHomePage, authedMarketplacePage, authedMarketplaceDealPage }) => {
+    async ({ authedHomePage, authedMarketplacePage, authedMarketplaceDealPage }) => {
       const count = await test.step('Open the Marketplace', async () => {
-        await resetToHome(authedPage, authedHomePage, data);
+        await authedHomePage.openAndSettle();
         await authedMarketplacePage.navigate();
         await authedMarketplacePage.expectMarketplaceLoaded();
         return authedMarketplacePage.getDealCardCount();
@@ -216,18 +191,16 @@ test.describe('Deal Card & Deal Detail View @regression @MarketplaceDealCardDeal
 
       await test.step('Verify the additional fields use "N/A" and MM/DD/YYYY dates', async () => {
         const fields = await authedMarketplaceDealPage.getAdditionalFields();
-        console.log(`Additional fields present = ${JSON.stringify(fields)}`);
+        Logger.log(`Additional fields present = ${JSON.stringify(fields)}`);
         expect(Object.keys(fields).length).toBeGreaterThan(0);
         for (const [label, value] of Object.entries(fields)) {
           expect(value, `${label} should not read bare "NA"`).not.toMatch(/^NA$/);
-          if (/Date$/.test(label) && value !== 'N/A') {
-            expect(value, `${label} should be MM/DD/YYYY`).toMatch(/^\d{2}\/\d{2}\/\d{4}$/);
-          }
+        }
+        for (const [label, value] of Object.entries(await authedMarketplaceDealPage.getAdditionalDateFields())) {
+          expect(value, `${label} should be MM/DD/YYYY`).toMatch(/^\d{2}\/\d{2}\/\d{4}$/);
         }
         await authedMarketplaceDealPage.close();
       });
-
-      await settleAfter(authedPage, data);
     },
   );
 
@@ -236,9 +209,9 @@ test.describe('Deal Card & Deal Detail View @regression @MarketplaceDealCardDeal
   test(
     'Property information is displayed on deal detail @regression',
     { tag: '@CARD-05' },
-    async ({ authedPage, data, authedHomePage, authedMarketplacePage, authedMarketplaceDealPage }) => {
+    async ({ authedHomePage, authedMarketplacePage, authedMarketplaceDealPage }) => {
       const count = await test.step('Open the Marketplace', async () => {
-        await resetToHome(authedPage, authedHomePage, data);
+        await authedHomePage.openAndSettle();
         await authedMarketplacePage.navigate();
         await authedMarketplacePage.expectMarketplaceLoaded();
         return authedMarketplacePage.getDealCardCount();
@@ -253,11 +226,9 @@ test.describe('Deal Card & Deal Detail View @regression @MarketplaceDealCardDeal
 
       await test.step('Read the property information, then close the deal', async () => {
         const propertyText = await authedMarketplaceDealPage.getPropertyInfoText();
-        console.log(`Property info section text = "${propertyText}"`);
+        Logger.log(`Property info section text = "${propertyText}"`);
         await authedMarketplaceDealPage.close();
       });
-
-      await settleAfter(authedPage, data);
     },
   );
 
@@ -269,9 +240,9 @@ test.describe('Deal Card & Deal Detail View @regression @MarketplaceDealCardDeal
   test(
     'A multi-franchise account can switch Bidding Franchise context on a deal @regression',
     { tag: '@CARD-06' },
-    async ({ authedPage, data, authedHomePage, authedMarketplacePage, authedMarketplaceDealPage }) => {
+    async ({ authedHomePage, authedMarketplacePage, authedMarketplaceDealPage }) => {
       const count = await test.step('Open the Marketplace', async () => {
-        await resetToHome(authedPage, authedHomePage, data);
+        await authedHomePage.openAndSettle();
         await authedMarketplacePage.navigate();
         await authedMarketplacePage.expectMarketplaceLoaded();
         return authedMarketplacePage.getDealCardCount();
@@ -286,12 +257,10 @@ test.describe('Deal Card & Deal Detail View @regression @MarketplaceDealCardDeal
 
       await test.step('Read the Bidding Franchise options, then close the deal', async () => {
         const franchiseCount = await authedMarketplaceDealPage.getBiddingFranchiseOptionCount();
-        console.log(`${franchiseCount} Bidding Franchise option(s)`);
+        Logger.log(`${franchiseCount} Bidding Franchise option(s)`);
         expect(franchiseCount).toBeGreaterThanOrEqual(0);
         await authedMarketplaceDealPage.close();
       });
-
-      await settleAfter(authedPage, data);
     },
   );
 
@@ -303,16 +272,16 @@ test.describe('Deal Card & Deal Detail View @regression @MarketplaceDealCardDeal
   test(
     'Direct Invite deals are tagged "Invited" under the My Direct Invites filter @regression',
     { tag: '@CARD-07' },
-    async ({ authedPage, data, authedHomePage, authedMarketplacePage }) => {
+    async ({ authedHomePage, authedMarketplacePage }) => {
       const count = await test.step('Open the Marketplace filtered to My Direct Invites', async () => {
-        await resetToHome(authedPage, authedHomePage, data);
+        await authedHomePage.openAndSettle();
         await authedMarketplacePage.navigate();
         await authedMarketplacePage.expectMarketplaceLoaded();
         await authedMarketplacePage.selectDealStatus('My Direct Invites');
         await authedMarketplacePage.applyFilters();
         await authedMarketplacePage.expectMarketplaceLoaded();
         const n = await authedMarketplacePage.getDealCardCount();
-        console.log(`${n} Direct Invite deal(s) found`);
+        Logger.log(`${n} Direct Invite deal(s) found`);
         return n;
       });
 
@@ -320,11 +289,9 @@ test.describe('Deal Card & Deal Detail View @regression @MarketplaceDealCardDeal
 
       await test.step('Verify the first card carries the "Invited" badge', async () => {
         const invited = await authedMarketplacePage.hasInvitedBadge(0);
-        console.log(`First card under My Direct Invites carries the "Invited" badge = ${invited}`);
+        Logger.log(`First card under My Direct Invites carries the "Invited" badge = ${invited}`);
         expect(invited).toBe(true);
       });
-
-      await settleAfter(authedPage, data);
     },
   );
 
@@ -336,9 +303,9 @@ test.describe('Deal Card & Deal Detail View @regression @MarketplaceDealCardDeal
   test(
     'Deal cards expose ARV / Stage / Opp Age / Listing Age / Last Activity @regression',
     { tag: '@CARD-08' },
-    async ({ authedPage, data, authedHomePage, authedMarketplacePage }) => {
+    async ({ authedHomePage, authedMarketplacePage }) => {
       const count = await test.step('Open the Marketplace', async () => {
-        await resetToHome(authedPage, authedHomePage, data);
+        await authedHomePage.openAndSettle();
         await authedMarketplacePage.navigate();
         await authedMarketplacePage.expectMarketplaceLoaded();
         return authedMarketplacePage.getDealCardCount();
@@ -347,21 +314,12 @@ test.describe('Deal Card & Deal Detail View @regression @MarketplaceDealCardDeal
       test.skip(count === 0, 'No deal cards in current sandbox state');
 
       await test.step('Verify the first card shows every core field', async () => {
-        const fields = {
-          mpdId: await authedMarketplacePage.getCardMpdId(0),
-          estArv: await authedMarketplacePage.getCardEstArv(0),
-          stage: await authedMarketplacePage.getCardStage(0),
-          oppAge: await authedMarketplacePage.getCardOppAge(0),
-          listingAge: await authedMarketplacePage.getCardListingAge(0),
-          lastActivity: await authedMarketplacePage.getCardLastActivity(0),
-        };
-        console.log(`${JSON.stringify(fields)}`);
+        const fields = await authedMarketplacePage.getCardCoreFields(0);
+        Logger.log(`${JSON.stringify(fields)}`);
         for (const [label, value] of Object.entries(fields)) {
-          expect(value.length, `${label} should be non-empty`).toBeGreaterThan(0);
+          expect(value, `${label} should be non-empty`).not.toBe('');
         }
       });
-
-      await settleAfter(authedPage, data);
     },
   );
 
@@ -373,11 +331,11 @@ test.describe('Deal Card & Deal Detail View @regression @MarketplaceDealCardDeal
   test(
     'Marketplace badge count reflects new deals and drops after visiting @regression',
     { tag: '@CARD-09' },
-    async ({ authedPage, data, authedHomePage, authedMarketplacePage }) => {
+    async ({ authedHomePage, authedMarketplacePage }) => {
       const before = await test.step('Read the Marketplace badge count on Home', async () => {
-        await resetToHome(authedPage, authedHomePage, data);
+        await authedHomePage.openAndSettle();
         const n = await authedHomePage.getMarketplaceBadgeCount();
-        console.log(`Marketplace badge count before visiting = ${n}`);
+        Logger.log(`Marketplace badge count before visiting = ${n}`);
         expect(n).toBeGreaterThanOrEqual(0);
         return n;
       });
@@ -385,16 +343,14 @@ test.describe('Deal Card & Deal Detail View @regression @MarketplaceDealCardDeal
       await test.step('Visit the Marketplace and return Home', async () => {
         await authedMarketplacePage.navigate();
         await authedMarketplacePage.expectMarketplaceLoaded();
-        await resetToHome(authedPage, authedHomePage, data);
+        await authedHomePage.openAndSettle();
       });
 
       await test.step('Verify the badge count did not grow', async () => {
         const after = await authedHomePage.getMarketplaceBadgeCount();
-        console.log(`Marketplace badge count after visiting and returning = ${after}`);
+        Logger.log(`Marketplace badge count after visiting and returning = ${after}`);
         expect(after).toBeLessThanOrEqual(before);
       });
-
-      await settleAfter(authedPage, data);
     },
   );
 
@@ -406,9 +362,9 @@ test.describe('Deal Card & Deal Detail View @regression @MarketplaceDealCardDeal
   test(
     'View Deal opens as a modal with required fields and a Close/Cancel control @regression',
     { tag: '@CARD-10' },
-    async ({ authedPage, data, authedHomePage, authedMarketplacePage, authedMarketplaceDealPage }) => {
+    async ({ authedHomePage, authedMarketplacePage, authedMarketplaceDealPage }) => {
       const count = await test.step('Open the Marketplace', async () => {
-        await resetToHome(authedPage, authedHomePage, data);
+        await authedHomePage.openAndSettle();
         await authedMarketplacePage.navigate();
         await authedMarketplacePage.expectMarketplaceLoaded();
         return authedMarketplacePage.getDealCardCount();
@@ -416,17 +372,17 @@ test.describe('Deal Card & Deal Detail View @regression @MarketplaceDealCardDeal
 
       test.skip(count === 0, 'No deal cards in current sandbox state');
 
-      const urlBeforeOpen = authedPage.url();
-
-      await test.step('Open the first deal', async () => {
+      const urlBeforeOpen = await test.step('Open the first deal, noting the URL first', async () => {
+        const url = authedMarketplacePage.getCurrentUrl();
         await authedMarketplacePage.openDealByIndex(0);
         await authedMarketplaceDealPage.expectLoaded();
+        return url;
       });
 
       // RA_025 — a real modal overlay, not a page navigation.
       await test.step('Verify it opened as a modal without navigating', async () => {
-        const urlAfterOpen = authedPage.url();
-        console.log(`URL before="${urlBeforeOpen}" after="${urlAfterOpen}"`);
+        const urlAfterOpen = authedMarketplacePage.getCurrentUrl();
+        Logger.log(`URL before="${urlBeforeOpen}" after="${urlAfterOpen}"`);
         expect(urlAfterOpen).toBe(urlBeforeOpen);
         await expect(authedMarketplaceDealPage.modalHeading).toBeVisible();
       });
@@ -436,7 +392,7 @@ test.describe('Deal Card & Deal Detail View @regression @MarketplaceDealCardDeal
         const mpdId = await authedMarketplaceDealPage.getMpdId();
         const location = await authedMarketplaceDealPage.getLocationText();
         const arv = await authedMarketplaceDealPage.getEstimatedArvText();
-        console.log(`MpdId="${mpdId}", location="${location}", arv="${arv}"`);
+        Logger.log(`MpdId="${mpdId}", location="${location}", arv="${arv}"`);
         expect(mpdId).toMatch(/MPD-\d+/);
         expect(location).toMatch(/Location: [^,]+, [A-Z]{2} \d{5}/);
         expect(arv).toMatch(/Estimated ARV: (N\/A|\$[\d,]+)/);
@@ -444,14 +400,9 @@ test.describe('Deal Card & Deal Detail View @regression @MarketplaceDealCardDeal
 
       // RA_028 — Close (X) or Cancel control present for this (Owner) persona.
       await test.step('Verify a Close or Cancel control is present, then close the deal', async () => {
-        const hasCancelAndClose = await authedMarketplaceDealPage.cancelAndCloseButton.isVisible().catch(() => false);
-        const hasCancel = await authedMarketplaceDealPage.cancelButton.isVisible().catch(() => false);
-        console.log(`Cancel and close visible=${hasCancelAndClose}, Cancel visible=${hasCancel}`);
-        expect(hasCancelAndClose || hasCancel).toBe(true);
+        expect(await authedMarketplaceDealPage.hasCloseControl(), 'a Close or Cancel control is offered').toBe(true);
         await authedMarketplaceDealPage.close();
       });
-
-      await settleAfter(authedPage, data);
     },
   );
 
@@ -463,16 +414,16 @@ test.describe('Deal Card & Deal Detail View @regression @MarketplaceDealCardDeal
   test(
     'Archived filter shows deals separately from Available, with no bid/deal actions @regression',
     { tag: '@CARD-11' },
-    async ({ authedPage, data, authedHomePage, authedMarketplacePage, authedMarketplaceDealPage }) => {
+    async ({ authedHomePage, authedMarketplacePage, authedMarketplaceDealPage }) => {
       const count = await test.step('Open the Marketplace filtered to Archived', async () => {
-        await resetToHome(authedPage, authedHomePage, data);
+        await authedHomePage.openAndSettle();
         await authedMarketplacePage.navigate();
         await authedMarketplacePage.expectMarketplaceLoaded();
         await authedMarketplacePage.selectDealStatus('Archived');
         await authedMarketplacePage.applyFilters();
         await authedMarketplacePage.expectMarketplaceLoaded();
         const n = await authedMarketplacePage.getDealCardCount();
-        console.log(`${n} archived deal(s) visible`);
+        Logger.log(`${n} archived deal(s) visible`);
         return n;
       });
 
@@ -487,7 +438,7 @@ test.describe('Deal Card & Deal Detail View @regression @MarketplaceDealCardDeal
         const canBid = await authedMarketplaceDealPage.isEligibleToBid();
         const canWithdrawBid = await authedMarketplaceDealPage.hasWithdrawBidOption();
         const canWithdrawDeal = await authedMarketplaceDealPage.hasWithdrawDealOption();
-        console.log(
+        Logger.log(
           `Archived deal actions — Place Bid=${canBid}, Withdraw Bid=${canWithdrawBid}, Withdraw Deal=${canWithdrawDeal}`,
         );
         // [KNOWN BUG] Live-verified 2026-08-21 (MPD-00998): the spreadsheet expects
@@ -504,14 +455,12 @@ test.describe('Deal Card & Deal Detail View @regression @MarketplaceDealCardDeal
         // requires an active bid, which an archived deal never has). Asserting
         // only the invariant that's actually held up live, not the full original
         // claim.
-        console.log(
+        Logger.log(
           '[KNOWN BUG] Place Bid / Withdraw Deal are not reliably gated by Archived status — only Withdraw Bid is.',
         );
         expect(canWithdrawBid).toBe(false);
         await authedMarketplaceDealPage.close();
       });
-
-      await settleAfter(authedPage, data);
     },
   );
 
@@ -520,16 +469,16 @@ test.describe('Deal Card & Deal Detail View @regression @MarketplaceDealCardDeal
     'A multi-franchise owner can list a seller op under their second franchise @regression',
     { tag: '@CARD-12' },
     async ({
-      authedPage,
-      data,
+      
+      
       authedHomePage,
       authedSellerLeadPage,
       authedMarketplacePage,
       authedMarketplaceDealPage,
     }) => {
       const deal = await test.step("List a fresh seller op under the owner's second franchise", async () => {
-        await resetToHome(authedPage, authedHomePage, data);
-        const listed = await listWithDirectInvite(
+        await authedHomePage.openAndSettle();
+        const listed = await listFreshDeal(
           authedHomePage,
           authedSellerLeadPage,
           authedMarketplacePage,
@@ -538,10 +487,9 @@ test.describe('Deal Card & Deal Detail View @regression @MarketplaceDealCardDeal
           '',
           { accountName: SECOND_FRANCHISE_ACCOUNT },
         );
-        expect(listed, 'the new seller op offers "List in Marketplace"').not.toBeNull();
-        expect(listed!.listingAccount).toBe(SECOND_FRANCHISE_ACCOUNT);
-        expect(listed!.mpdId).toMatch(/^MPD-\d+$/);
-        return listed!;
+        expect(listed.listingAccount).toBe(SECOND_FRANCHISE_ACCOUNT);
+        expect(listed.mpdId).toMatch(/^MPD-\d+$/);
+        return listed;
       });
 
       // The Bidding Franchise dropdown is also the acting-franchise context: Withdraw Deal only
@@ -563,10 +511,8 @@ test.describe('Deal Card & Deal Detail View @regression @MarketplaceDealCardDeal
       // Withdrawn straight away so the test deal doesn't sit in other franchises' Available list.
       await test.step('Withdraw the test deal', async () => {
         await authedMarketplaceDealPage.withdrawDeal();
-        console.log(`${deal.mpdId} withdrawn: "${await authedMarketplaceDealPage.waitForToastText().catch(() => '')}"`);
+        Logger.log(`${deal.mpdId} withdrawn: "${await authedMarketplaceDealPage.waitForToastText().catch(() => '')}"`);
       });
-
-      await settleAfter(authedPage, data);
     },
   );
 
@@ -574,9 +520,9 @@ test.describe('Deal Card & Deal Detail View @regression @MarketplaceDealCardDeal
   test(
     "Bidding Franchise offers each of the owner's franchises on another franchise's deal @regression",
     { tag: '@CARD-13' },
-    async ({ authedPage, data, authedHomePage, authedMarketplacePage, authedMarketplaceDealPage }) => {
+    async ({ authedHomePage, authedMarketplacePage, authedMarketplaceDealPage }) => {
       const count = await test.step('Open the Marketplace with filters reset', async () => {
-        await resetToHome(authedPage, authedHomePage, data);
+        await authedHomePage.openAndSettle();
         await authedMarketplacePage.navigate();
         await authedMarketplacePage.resetFilters();
         await authedMarketplacePage.expectMarketplaceLoaded();
@@ -592,18 +538,19 @@ test.describe('Deal Card & Deal Detail View @regression @MarketplaceDealCardDeal
 
       await test.step("Verify both of the owner's franchises are offered, then close the deal", async () => {
         const options = await authedMarketplaceDealPage.getBiddingFranchiseOptions();
-        console.log(
+        Logger.log(
           `${await authedMarketplaceDealPage.getMpdId()} Bidding Franchise options: ${JSON.stringify(options)}`,
         );
         expect(options).toEqual(
           expect.arrayContaining(
-            [envConfig.FRANCHISE_A_NAME, SECOND_FRANCHISE_ACCOUNT].map((n) => expect.stringContaining(n.split(',')[0])),
+            [
+              expect.stringContaining(franchiseBaseName(envConfig.FRANCHISE_A_NAME)),
+              expect.stringContaining(franchiseBaseName(SECOND_FRANCHISE_ACCOUNT)),
+            ],
           ),
         );
         await authedMarketplaceDealPage.close();
       });
-
-      await settleAfter(authedPage, data);
     },
   );
 });
@@ -617,47 +564,29 @@ test.describe('Deal Card & Deal Detail View — property image @regression @Mark
   test(
     'A deal with no uploaded photo shows a Google property image in the deal view @regression',
     { tag: '@CARD-14' },
-    async ({ authedPage, data, authedHomePage, authedMarketplacePage, authedMarketplaceDealPage }) => {
+    async ({ authedHomePage, authedMarketplacePage, authedMarketplaceDealPage }) => {
       const ids = await test.step('Open the Marketplace filtered to My Listed Deals', async () => {
-        await resetToHome(authedPage, authedHomePage, data);
+        await authedHomePage.openAndSettle();
         await authedMarketplacePage.navigate();
         await authedMarketplacePage.resetFilters();
-        await authedMarketplacePage.selectDealStatus('My Listed Deals'); // test deals are listed from fresh ops with no uploaded photo
+        // Test deals are listed from fresh ops with no uploaded photo.
+        await authedMarketplacePage.selectDealStatus('My Listed Deals');
         await authedMarketplacePage.applyFilters();
         await authedMarketplacePage.expectMarketplaceLoaded();
-        return (await authedMarketplacePage.getAllCardMpdIds()).slice(0, 8);
+        return authedMarketplacePage.getFirstCardMpdIds(8);
       });
 
       test.skip(ids.length === 0, 'No listed deals');
 
       // Seen QA 2026-10-11: the Google (Street View) image shows when Google has imagery for the
       // address; otherwise the deal falls back to a placeholder drawing (e.g. rural Almont, CO).
-      const results = await test.step('Open each listed deal and check which image it shows', async () => {
-        const found: string[] = [];
-        for (const id of ids) {
-          expect(await authedMarketplacePage.openDealByMpdId(id)).toBe(true);
-          await authedMarketplaceDealPage.expectLoaded();
-          await expect.poll(() => authedMarketplaceDealPage.getMpdId(), { timeout: 10000 }).toBe(id);
-          await authedPage.waitForTimeout(1500); // the image is swapped in after the modal opens
-          const srcs = await authedMarketplaceDealPage.getDealDialogImageSources();
-          // The fetched Google image is stored on the record (rtaImage servlet); the fallback is a static-resource drawing.
-          const google = srcs.some((x) => /rtaImage/.test(x));
-          found.push(`${id}=${google ? 'Google' : 'placeholder'}`);
-          await authedMarketplaceDealPage.close();
-          await authedMarketplaceDealPage.waitForDealDialogHidden();
-        }
-        console.log(`Deal images: ${found.join(', ')}`);
-        return found;
+      const googleIds = await test.step('Open each listed deal and check which image it shows', async () => {
+        return dealsShowingGoogleImage(authedMarketplacePage, authedMarketplaceDealPage, ids);
       });
 
       await test.step('Verify at least one deal shows a Google property image', async () => {
-        expect(
-          results.some((r) => r.endsWith('=Google')),
-          'at least one listed deal shows a Google property image',
-        ).toBe(true);
+        expect(googleIds.length, 'at least one listed deal shows a Google property image').toBeGreaterThan(0);
       });
-
-      await settleAfter(authedPage, data);
     },
   );
 });
@@ -682,29 +611,6 @@ const WON_FIELDS = [
   'Sold Date',
 ];
 
-/** Opens `mpdId` under a Deal Status plus a Deal Stage / Bid Stage sub-filter; false if it isn't listed there. */
-async function openUnder(
-  mp: MarketplacePage,
-  dp: MarketplaceDealPage,
-  mpdId: string,
-  status: 'My Listed Deals' | 'My Bids',
-  stage: MarketplaceDealStage | MarketplaceBidStage,
-) {
-  await mp.navigate();
-  await mp.resetFilters();
-  await mp.expectMarketplaceLoaded();
-  await mp.selectDealStatus(status);
-  if (status === 'My Listed Deals') await mp.selectDealStage(stage as MarketplaceDealStage);
-  else await mp.selectBidStage(stage as MarketplaceBidStage);
-  await mp.applyFilters();
-  await mp.expectMarketplaceLoaded();
-  if (!(await mp.openDealByMpdId(mpdId))) return false;
-  await dp.expectLoaded();
-  return true;
-}
-
-const shownFields = async (dp: MarketplaceDealPage) => Object.keys(await dp.getAdditionalFields());
-
 test.describe('Deal Card & Deal Detail View — additional fields by role and stage @regression @MarketplaceDealCardDealDetailView @TwoAccount', () => {
   test.describe.configure({ timeout: 1_200_000 });
 
@@ -719,10 +625,11 @@ test.describe('Deal Card & Deal Detail View — additional fields by role and st
   for (const type of ['Opportunity', 'Assignment'] as const) {
     const opp = type === 'Opportunity';
 
-    // Covers: UF_002, UF_003, UF_010, UF_011, UF_006, UF_007, FD_001, FD_003 (Opportunity); UF_004, UF_005, UF_014, UF_008, UF_009 (Assignment)
+    // Covers: UF_002, UF_003, UF_010, UF_011, UF_006, UF_007, FD_001, FD_003 (Opportunity); UF_004, UF_005, UF_014,
+    // UF_008, UF_009 (Assignment)
     test(`Only the listing franchise sees the additional fields on a live ${type} deal; both it and the winner see all of them once won @regression`, async ({
-      authedPage,
-      otherFranchisePage,
+      
+      
       authedHomePage,
       authedSellerLeadPage,
       authedMarketplacePage,
@@ -733,21 +640,22 @@ test.describe('Deal Card & Deal Detail View — additional fields by role and st
       const a = authedMarketplaceDealPage;
       const o = otherFranchiseMarketplaceDealPage;
       const bidder = SECOND_FRANCHISE_ACCOUNT;
-      let deal!: DirectInviteDeal;
 
       // Covers: UF_002 (Opportunity), UF_004 (Assignment)
+      const deal = await test.step(`List a fresh ${type} deal as Franchise A`, async () => {
+        return listFreshDeal(authedHomePage, authedSellerLeadPage, authedMarketplacePage, a, type, '');
+      });
+
       await test.step(`The listing franchise sees the additional fields on its new ${type} deal`, async () => {
-        deal = (await listWithDirectInvite(authedHomePage, authedSellerLeadPage, authedMarketplacePage, a, type, ''))!;
-        expect(deal, 'fresh seller op lists').toBeTruthy();
         await a.selectFranchiseIfPresent(envConfig.FRANCHISE_A_NAME);
-        expect(await shownFields(a)).toEqual(expect.arrayContaining(ACTIVE_FIELDS));
+        expect(await a.getAdditionalFieldNames()).toEqual(expect.arrayContaining(ACTIVE_FIELDS));
         // A fresh listing starts in the Ad Council stage.
-        expect((await a.getAdditionalFields())['Deal Stage'], 'new deal is in the Ad Council stage').toBe('Ad Council');
+        expect(await a.getDealStage(), 'new deal is in the Ad Council stage').toBe('Ad Council');
         if (!opp) {
           // Covers: UF_014 — the owner's other franchise is not involved in this deal yet.
           await a.selectFranchiseIfPresent(bidder);
           await expect
-            .poll(() => shownFields(a), {
+            .poll(() => a.getAdditionalFieldNames(), {
               timeout: 15000,
               message: 'an uninvolved franchise sees no additional fields',
             })
@@ -758,13 +666,13 @@ test.describe('Deal Card & Deal Detail View — additional fields by role and st
 
       // Covers: UF_003 (Opportunity), UF_005 (Assignment)
       await test.step('A franchise that can bid sees none of them', async () => {
-        await otherFranchisePage.bringToFront();
+        await otherFranchiseMarketplacePage.bringToFront();
         expect(
           await openDealAs(otherFranchiseMarketplacePage, o, deal.mpdId, 'Available', bidder),
           'the other franchise sees the deal',
         ).toBe(true);
         expect(await o.isEligibleToBid(), 'Place Bid offered during the Ad Council stage').toBe(true);
-        expect(await shownFields(o)).toEqual([]);
+        expect(await o.getAdditionalFieldNames()).toEqual([]);
         await o.close();
         await placeBidAs(otherFranchiseMarketplacePage, o, deal.mpdId, 'Bid for the fields check', bidder);
         await o.close();
@@ -774,14 +682,14 @@ test.describe('Deal Card & Deal Detail View — additional fields by role and st
         // Covers: UF_010, UF_011
         await test.step('While the bid is In Review the listing franchise still sees them and the bidder does not', async () => {
           expect(await openDealAs(otherFranchiseMarketplacePage, o, deal.mpdId, 'My Bids', bidder)).toBe(true);
-          expect(await shownFields(o), 'bidder, bid In Review').toEqual([]);
+          expect(await o.getAdditionalFieldNames(), 'bidder, bid In Review').toEqual([]);
           await o.close();
-          await authedPage.bringToFront();
+          await authedMarketplacePage.bringToFront();
           expect(
             await openDealAs(authedMarketplacePage, a, deal.mpdId, 'My Listed Deals', envConfig.FRANCHISE_A_NAME),
           ).toBe(true);
           expect(await a.getDealDialogText()).toMatch(/In Review/);
-          expect(await shownFields(a), 'listing franchise, bid In Review').toEqual(
+          expect(await a.getAdditionalFieldNames(), 'listing franchise, bid In Review').toEqual(
             expect.arrayContaining(ACTIVE_FIELDS),
           );
           await a.close();
@@ -789,7 +697,7 @@ test.describe('Deal Card & Deal Detail View — additional fields by role and st
       }
 
       await test.step("The listing franchise accepts the other franchise's bid", async () => {
-        await authedPage.bringToFront();
+        await authedMarketplacePage.bringToFront();
         expect(
           await openDealAs(authedMarketplacePage, a, deal.mpdId, 'My Listed Deals', envConfig.FRANCHISE_A_NAME),
         ).toBe(true);
@@ -801,23 +709,23 @@ test.describe('Deal Card & Deal Detail View — additional fields by role and st
 
       // Covers: UF_006 / FD_003 (Opportunity), UF_008 (Assignment)
       await test.step('Under My Listed Deals > Bid Accepted the listing franchise sees the won message and all seven fields', async () => {
-        expect(await openUnder(authedMarketplacePage, a, deal.mpdId, 'My Listed Deals', 'Bid Accepted')).toBe(true);
+        expect(await openListedDealUnderStage(authedMarketplacePage, a, deal.mpdId, 'Bid Accepted')).toBe(true);
         await a.selectFranchiseIfPresent(envConfig.FRANCHISE_A_NAME);
         expect(await a.getDealDialogText()).toContain(
           `This Marketplace deal has already been won. The winning franchise for this deal is: ${bidder}.`,
         );
-        expect(await shownFields(a)).toEqual(expect.arrayContaining(WON_FIELDS));
+        expect(await a.getAdditionalFieldNames()).toEqual(expect.arrayContaining(WON_FIELDS));
         await a.close();
       });
 
       // Covers: UF_007 / FD_001 (Opportunity), UF_009 (Assignment)
       await test.step('Under My Bids > Accepted the winning franchise sees the won message and all seven fields', async () => {
-        await otherFranchisePage.bringToFront();
-        expect(await openUnder(otherFranchiseMarketplacePage, o, deal.mpdId, 'My Bids', 'Accepted')).toBe(true);
+        await otherFranchiseMarketplacePage.bringToFront();
+        expect(await openBidDealUnderStage(otherFranchiseMarketplacePage, o, deal.mpdId, 'Accepted')).toBe(true);
         expect(await o.getDealDialogText()).toContain(
           `This Marketplace deal has already been won. The winning franchise for this deal is: ${bidder}.`,
         );
-        expect(await shownFields(o)).toEqual(expect.arrayContaining(WON_FIELDS));
+        expect(await o.getAdditionalFieldNames()).toEqual(expect.arrayContaining(WON_FIELDS));
         await o.close();
       });
     });
@@ -825,8 +733,8 @@ test.describe('Deal Card & Deal Detail View — additional fields by role and st
 
   // Covers: UF_012, UF_013, FD_005
   test('After a bid is declined the listing franchise still sees the additional fields and the declined bidder sees none @regression', async ({
-    authedPage,
-    otherFranchisePage,
+    
+    
     authedHomePage,
     authedSellerLeadPage,
     authedMarketplacePage,
@@ -837,27 +745,22 @@ test.describe('Deal Card & Deal Detail View — additional fields by role and st
     const a = authedMarketplaceDealPage;
     const o = otherFranchiseMarketplaceDealPage;
     const bidder = SECOND_FRANCHISE_ACCOUNT;
-    let deal!: DirectInviteDeal;
 
-    await test.step('Franchise A lists a new Opportunity deal and the other franchise bids on it', async () => {
-      deal = (await listWithDirectInvite(
-        authedHomePage,
-        authedSellerLeadPage,
-        authedMarketplacePage,
-        a,
-        'Opportunity',
-        '',
-      ))!;
-      expect(deal, 'fresh seller op lists').toBeTruthy();
+    const deal = await test.step('Franchise A lists a new Opportunity deal', async () => {
+      const listed = await listFreshDeal(authedHomePage, authedSellerLeadPage, authedMarketplacePage, a, 'Opportunity', '');
       await a.close();
-      await otherFranchisePage.bringToFront();
+      return listed;
+    });
+
+    await test.step('The other franchise bids on it', async () => {
+      await otherFranchiseMarketplacePage.bringToFront();
       await placeBidAs(otherFranchiseMarketplacePage, o, deal.mpdId, 'Bid to be declined for the fields check', bidder);
       await o.close();
     });
 
     // Covers: UF_012
     await test.step('After declining the bid, the listing franchise still sees them', async () => {
-      await authedPage.bringToFront();
+      await authedMarketplacePage.bringToFront();
       expect(
         await openDealAs(authedMarketplacePage, a, deal.mpdId, 'My Listed Deals', envConfig.FRANCHISE_A_NAME),
       ).toBe(true);
@@ -868,26 +771,26 @@ test.describe('Deal Card & Deal Detail View — additional fields by role and st
       expect(
         await openDealAs(authedMarketplacePage, a, deal.mpdId, 'My Listed Deals', envConfig.FRANCHISE_A_NAME),
       ).toBe(true);
-      expect(await shownFields(a), 'listing franchise, a bid Declined').toEqual(expect.arrayContaining(ACTIVE_FIELDS));
+      expect(await a.getAdditionalFieldNames(), 'listing franchise, a bid Declined').toEqual(expect.arrayContaining(ACTIVE_FIELDS));
       await a.close();
     });
 
     // Covers: UF_013, FD_005
     await test.step('Under My Bids > Lost the declined bidder sees its lost-bid message and no additional fields', async () => {
-      await otherFranchisePage.bringToFront();
-      expect(await openUnder(otherFranchiseMarketplacePage, o, deal.mpdId, 'My Bids', 'Lost')).toBe(true);
+      await otherFranchiseMarketplacePage.bringToFront();
+      expect(await openBidDealUnderStage(otherFranchiseMarketplacePage, o, deal.mpdId, 'Lost')).toBe(true);
       await o.selectFranchiseIfPresent(bidder);
       // App copy (QA 2026-10-26): a declined bid reads as "Bid Lost" to the bidder.
       expect(await o.getDealDialogText()).toContain(
         `You have already placed a bid on this Marketplace deal with ${bidder}. Current bid status: Bid Lost`,
       );
-      expect(await shownFields(o), 'declined bidder sees no additional fields').toEqual([]);
+      expect(await o.getAdditionalFieldNames(), 'declined bidder sees no additional fields').toEqual([]);
       expect(await o.isEligibleToBid(), 'a declined franchise cannot bid again').toBe(false);
       await o.close();
     });
 
     await test.step('Clean up: Franchise A withdraws the deal', async () => {
-      await authedPage.bringToFront();
+      await authedMarketplacePage.bringToFront();
       expect(
         await openDealAs(authedMarketplacePage, a, deal.mpdId, 'My Listed Deals', envConfig.FRANCHISE_A_NAME),
       ).toBe(true);

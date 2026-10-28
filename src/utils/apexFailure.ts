@@ -9,9 +9,16 @@ import type { Page, Route } from '@playwright/test';
  * existingBidFranchise, EligibleForWithdrawDeal when a deal opens).
  * Returns the method names it failed, and a function that removes the route.
  */
-export async function failApexMethod(page: Page, method: RegExp) {
+export interface ApexFailure {
+  /** Apex method names that were failed so far. */
+  failed: string[];
+  /** Removes the route, letting Apex calls through again. */
+  restore: () => Promise<void>;
+}
+
+export async function failApexMethod(page: Page, method: RegExp): Promise<ApexFailure> {
   const failed: string[] = [];
-  const handler = async (route: Route) => {
+  const handler = async (route: Route): Promise<void> => {
     let name = '';
     try {
       name = JSON.parse(route.request().postData() || '{}').method ?? '';

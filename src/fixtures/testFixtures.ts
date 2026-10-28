@@ -1,14 +1,15 @@
 import { test as base } from '@playwright/test';
 import type { Page, BrowserContext, Browser } from '@playwright/test';
-import { HomePage } from '../modules/dashboard';
-import { NotificationsPanelComponent } from '../modules/notifications';
-import { MarketplacePage, MarketplaceDealPage } from '../modules/marketplace';
-import { SellerLeadPage } from '../modules/seller';
-import { ModalComponent } from '../shared';
+import { HomePage } from '@modules/dashboard';
+import { NotificationsPanelComponent, NotificationSettingsPage } from '@modules/notifications';
+import { MarketplacePage, MarketplaceDealPage } from '@modules/marketplace';
+import { SellerLeadPage } from '@modules/seller';
+import { ModalComponent } from '../shared/components/ModalComponent';
 import * as testDataJson from './data/testData.json';
-import { registerFinishLoggingInHandler, registerSessionRecoveryHandler } from '../utils/authHelper';
-import { ensureLoggedIn, getAccount, isConfigured, newSessionContext, type AccountKey } from '../utils/sessionStore';
-import { envConfig } from '../config/env.config';
+import { registerFinishLoggingInHandler, registerSessionRecoveryHandler } from '@utils/authHelper';
+import { ensureLoggedIn, getAccount, isConfigured, newSessionContext, type AccountKey } from '@utils/sessionStore';
+import { envConfig } from '@config/env.config';
+import { Routes } from '@enums/routes.enum';
 
 // ---- Strongly typed shape of the test data file ----------------------------------------
 // Trimmed to only the sections src/tests/marketplace actually reads (see
@@ -30,7 +31,7 @@ const data = testDataJson as TestData;
  * session globalSetup saved (see utils/sessionStore). Skips the test when the
  * account has no credentials in .env.<ENV>.
  */
-async function sessionPage(browser: Browser, key: AccountKey, use: (page: Page) => Promise<void>) {
+async function sessionPage(browser: Browser, key: AccountKey, use: (page: Page) => Promise<void>): Promise<void> {
   const account = getAccount(key);
   if (!isConfigured(account)) {
     test.skip(true, `${account.envPrefix}_USERNAME/${account.envPrefix}_PASSWORD not set in .env.${envConfig.ENV}`);
@@ -85,6 +86,11 @@ interface TestFixtures {
    * requested directly by tests.
    */
   _dismissStrayModal: void;
+  /**
+   * Auto-fixture teardown: after every test, lets any in-flight Salesforce
+   * save on `authedPage` finish (spinner gone) before the next test starts.
+   */
+  _settleAfterTest: void;
 
   // --- Authed page POMs ---
   authedHomePage: HomePage;
@@ -92,6 +98,7 @@ interface TestFixtures {
   authedMarketplaceDealPage: MarketplaceDealPage;
   authedNotificationsPanelComponent: NotificationsPanelComponent;
   authedSellerLeadPage: SellerLeadPage;
+  authedNotificationSettingsPage: NotificationSettingsPage;
 
   // --- Franchise B (second account) POMs — mirror the authed* POMs above,
   // wired to franchiseBPage instead of authedPage, for cross-account tests ---
@@ -105,6 +112,17 @@ interface TestFixtures {
   otherFranchiseMarketplacePage: MarketplacePage;
   otherFranchiseMarketplaceDealPage: MarketplaceDealPage;
   otherFranchiseNotificationsPanelComponent: NotificationsPanelComponent;
+  otherFranchiseSellerLeadPage: SellerLeadPage;
+  franchiseBSellerLeadPage: SellerLeadPage;
+
+  // --- Marketplace Delegate (coordinatorRolePage) and Buyer (buyerRolePage) role POMs ---
+  coordinatorHomePage: HomePage;
+  coordinatorSellerLeadPage: SellerLeadPage;
+  coordinatorMarketplacePage: MarketplacePage;
+  coordinatorMarketplaceDealPage: MarketplaceDealPage;
+  buyerSellerLeadPage: SellerLeadPage;
+  buyerMarketplacePage: MarketplacePage;
+  buyerMarketplaceDealPage: MarketplaceDealPage;
 }
 
 export const test = base.extend<TestFixtures, WorkerFixtures>({
@@ -144,6 +162,9 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
       }
       const page = await authedPage.context().newPage();
       await registerFinishLoggingInHandler(page);
+      // A new tab on a cached-session context starts blank — navigate for real before any test uses it.
+      await page.goto(Routes.HOME);
+      await page.waitForLoadState('domcontentloaded');
       await use(page);
       await page.close();
     },
@@ -166,6 +187,14 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
       await new ModalComponent(authedPage).closeAnyOpenModal();
       await new HomePage(authedPage).closeRecentlyVisitedLeadsIfOpen();
       await use();
+    },
+    { auto: true },
+  ],
+
+  _settleAfterTest: [
+    async ({ authedPage, data }, use) => {
+      await use();
+      await new ModalComponent(authedPage).waitForSpinner(data.timeouts.afterEach);
     },
     { auto: true },
   ],
@@ -202,6 +231,9 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
   authedSellerLeadPage: async ({ authedPage }, use) => {
     await use(new SellerLeadPage(authedPage));
   },
+  authedNotificationSettingsPage: async ({ authedPage }, use) => {
+    await use(new NotificationSettingsPage(authedPage));
+  },
 
   // --- Franchise B (second account) POMs ---
   franchiseBHomePage: async ({ franchiseBPage }, use) => {
@@ -229,6 +261,35 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
   },
   otherFranchiseNotificationsPanelComponent: async ({ otherFranchisePage }, use) => {
     await use(new NotificationsPanelComponent(otherFranchisePage));
+  },
+  otherFranchiseSellerLeadPage: async ({ otherFranchisePage }, use) => {
+    await use(new SellerLeadPage(otherFranchisePage));
+  },
+  franchiseBSellerLeadPage: async ({ franchiseBPage }, use) => {
+    await use(new SellerLeadPage(franchiseBPage));
+  },
+
+  // --- Marketplace Delegate and Buyer role POMs ---
+  coordinatorHomePage: async ({ coordinatorRolePage }, use) => {
+    await use(new HomePage(coordinatorRolePage));
+  },
+  coordinatorSellerLeadPage: async ({ coordinatorRolePage }, use) => {
+    await use(new SellerLeadPage(coordinatorRolePage));
+  },
+  coordinatorMarketplacePage: async ({ coordinatorRolePage }, use) => {
+    await use(new MarketplacePage(coordinatorRolePage));
+  },
+  coordinatorMarketplaceDealPage: async ({ coordinatorRolePage }, use) => {
+    await use(new MarketplaceDealPage(coordinatorRolePage));
+  },
+  buyerSellerLeadPage: async ({ buyerRolePage }, use) => {
+    await use(new SellerLeadPage(buyerRolePage));
+  },
+  buyerMarketplacePage: async ({ buyerRolePage }, use) => {
+    await use(new MarketplacePage(buyerRolePage));
+  },
+  buyerMarketplaceDealPage: async ({ buyerRolePage }, use) => {
+    await use(new MarketplaceDealPage(buyerRolePage));
   },
 });
 

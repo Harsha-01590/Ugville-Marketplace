@@ -1,8 +1,15 @@
-import type { Page } from '@playwright/test';
-import { envConfig } from '../config/env.config';
-import type { HomePage } from '../modules/dashboard';
-import type { SellerLeadPage, MarketplaceDealType } from '../modules/seller';
-import { MarketplacePage, MarketplaceDealPage, type DealStatus } from '../modules/marketplace';
+import { type Page, expect } from '@playwright/test';
+import { envConfig } from '@config/env.config';
+import type { HomePage } from '@modules/dashboard';
+import type { SellerLeadPage, MarketplaceDealType } from '@modules/seller';
+import {
+  MarketplacePage,
+  MarketplaceDealPage,
+  type DealStatus,
+  type MarketplaceBidStage,
+  type MarketplaceDealStage,
+} from '@modules/marketplace';
+import { Logger } from './logger';
 
 export interface DirectInviteDeal {
   mpdId: string;
@@ -44,7 +51,7 @@ export async function listWithDirectInvite(
 ): Promise<DirectInviteDeal | null> {
   const oppName = await seller.createFromHome(home, opts.accountName ?? envConfig.FRANCHISE_A_NAME);
   if (!(await seller.isListInMarketplaceCtaShown())) {
-    console.log(
+    Logger.log(
       `  [DirectInvite] new seller op ${oppName} shows "${await seller.getMarketplaceCtaText()}", not "List in Marketplace"`,
     );
     return null;
@@ -79,10 +86,54 @@ export async function listWithDirectInvite(
   if (!text.includes(dealTerms)) {
     throw new Error(`Newest listed deal ${mpdId} is not the one just saved (Deal Terms "${dealTerms}" not found)`);
   }
-  console.log(
+  Logger.log(
     `  [DirectInvite] ${oppName} listed as ${type} → ${mpdId}${invitee ? `, invited ${invitee}` : ', no Direct Invite'}`,
   );
   return { mpdId, oppName, dealTerms, oppDetails, oppId, listingAccount, listToast };
+}
+
+/**
+ * `listWithDirectInvite` for tests that need the listing to succeed: fails with
+ * a clear error instead of returning null when the fresh seller op can't be listed.
+ */
+export async function listFreshDeal(
+  home: HomePage,
+  seller: SellerLeadPage,
+  marketplace: MarketplacePage,
+  dealPage: MarketplaceDealPage,
+  type: MarketplaceDealType,
+  invitee: string,
+  opts: { accountName?: string; beforeList?: () => Promise<void> } = {},
+): Promise<DirectInviteDeal> {
+  const deal = await listWithDirectInvite(home, seller, marketplace, dealPage, type, invitee, opts);
+  if (!deal) throw new Error('A freshly created seller op must show "List in Marketplace", but it did not');
+  return deal;
+}
+
+/**
+ * Lists a fresh seller op as `type` with only the required fields (no ARV, no
+ * Direct Invite), checks the listing toast, blank ARV and non-Direct stage, then
+ * confirms the Opportunity's CTA flipped to "View in Marketplace". Returns the
+ * deal's type badge.
+ */
+export async function listWithRequiredFieldsOnly(
+  type: MarketplaceDealType,
+  home: HomePage,
+  seller: SellerLeadPage,
+  marketplace: MarketplacePage,
+  dealPage: MarketplaceDealPage,
+): Promise<string> {
+  const deal = await listFreshDeal(home, seller, marketplace, dealPage, type, '');
+  // The app words it "<Type> Deal listed to Marketplace successfully." (sheet: "The <type> deal listed…").
+  expect(deal.listToast, 'success toast').toMatch(new RegExp(`${type} deal listed to Marketplace successfully`, 'i'));
+  expect(await dealPage.getDealDialogText(), 'Estimated ARV left blank').toContain('Estimated ARV: N/A');
+  expect(await dealPage.getDealStage(), 'no Direct Invite').not.toBe('Direct');
+  const badge = await dealPage.getDealTypeBadge();
+  Logger.log(`  [Form] ${deal.mpdId} listed as ${type}, badge "${badge}"`);
+  await dealPage.close();
+  await seller.navigateById(deal.oppId);
+  await expect.poll(() => seller.getMarketplaceCtaText(), { timeout: 30000 }).toMatch(/^View (in )?Marketplace/);
+  return badge;
 }
 
 /**
@@ -115,6 +166,44 @@ export async function openDealAs(
   return true;
 }
 
+export interface SecondTab {
+  tab: Page;
+  marketplace: MarketplacePage;
+  dealPage: MarketplaceDealPage;
+}
+
+/** Opens `mpdId` under My Listed Deals + a Deal Stage, with filters reset first; false if it isn't listed there. */
+export async function openListedDealUnderStage(
+  marketplace: MarketplacePage,
+  dealPage: MarketplaceDealPage,
+  mpdId: string,
+  stage: MarketplaceDealStage,
+): Promise<boolean> {
+  await marketplace.showList('My Listed Deals');
+  await marketplace.selectDealStage(stage);
+  await marketplace.applyFilters();
+  await marketplace.expectMarketplaceLoaded();
+  if (!(await marketplace.openDealByMpdId(mpdId))) return false;
+  await dealPage.expectLoaded();
+  return true;
+}
+
+/** Opens `mpdId` under My Bids + a Bid Stage, with filters reset first; false if it isn't listed there. */
+export async function openBidDealUnderStage(
+  marketplace: MarketplacePage,
+  dealPage: MarketplaceDealPage,
+  mpdId: string,
+  stage: MarketplaceBidStage,
+): Promise<boolean> {
+  await marketplace.showList('My Bids');
+  await marketplace.selectBidStage(stage);
+  await marketplace.applyFilters();
+  await marketplace.expectMarketplaceLoaded();
+  if (!(await marketplace.openDealByMpdId(mpdId))) return false;
+  await dealPage.expectLoaded();
+  return true;
+}
+
 /**
  * Opens `mpdId` in a second tab of `page`'s session (same login) and leaves it
  * open there. The tab's view goes stale once the other window changes the deal
@@ -122,7 +211,12 @@ export async function openDealAs(
  * guards ("Bid Record Already Exists…", "…cannot be withdrawn…") that the
  * refreshed UI hides by removing the button. Close the returned page when done.
  */
-export async function openDealInSecondTab(page: Page, mpdId: string, status?: DealStatus, franchise?: string) {
+export async function openDealInSecondTab(
+  page: Page,
+  mpdId: string,
+  status?: DealStatus,
+  franchise?: string,
+): Promise<SecondTab> {
   const tab = await page.context().newPage();
   const marketplace = new MarketplacePage(tab);
   const dealPage = new MarketplaceDealPage(tab);
@@ -143,16 +237,88 @@ export async function placeBidAs(
   mpdId: string,
   reason: string,
   franchise?: string,
-) {
+): Promise<void> {
   if (!(await openDealAs(marketplace, dealPage, mpdId, 'Available', franchise))) {
     throw new Error(`${mpdId} is not in the bidding franchise's Available deals`);
   }
   await dealPage.openPlaceBidConfirmation(reason);
   await dealPage.submitPlaceBidConfirmation();
   await dealPage
-    .messageText(/You have successfully bid(ed)? for this Deal/)
+    .getMessageText(/You have successfully bid(ed)? for this Deal/)
     .waitFor({ state: 'visible', timeout: 30000 })
     .catch(() => {});
   await dealPage.waitForStabilization(2000);
-  console.log(`  [Bid] placed a bid on ${mpdId}`);
+  Logger.log(`  [Bid] placed a bid on ${mpdId}`);
+}
+
+/**
+ * The bidding franchise bids on `mpdId` straight from its already-open Available
+ * list (no reload first), acting as `franchise`, and closes the modal.
+ */
+export async function bidFromOpenList(
+  marketplace: MarketplacePage,
+  dealPage: MarketplaceDealPage,
+  mpdId: string,
+  reason: string,
+  franchise: string,
+): Promise<void> {
+  await marketplace.bringToFront();
+  expect(await marketplace.openDealByMpdId(mpdId), `${mpdId} is on the open list`).toBe(true);
+  await dealPage.expectLoaded();
+  await dealPage.selectFranchiseIfPresent(franchise);
+  await dealPage.openPlaceBidConfirmation(reason);
+  await dealPage.submitPlaceBidConfirmation();
+  expect(await dealPage.waitForToastText()).toMatch(/successfully bid/i);
+  await dealPage.close();
+}
+
+/**
+ * After a rejected bid attempt: clears its toast and confirmation popup, and
+ * reopens `mpdId` from Available (as `franchise`) if the rejection also closed the modal.
+ */
+export async function reopenAfterRejectedBid(
+  marketplace: MarketplacePage,
+  dealPage: MarketplaceDealPage,
+  mpdId: string,
+  franchise: string,
+): Promise<void> {
+  await dealPage.dismissToasts();
+  await dealPage.cancelPlaceBidConfirmation();
+  if (!(await dealPage.isOpen())) {
+    expect(await openDealAs(marketplace, dealPage, mpdId, 'Available', franchise)).toBe(true);
+  }
+}
+
+/**
+ * Clicks the seller op's "View in Marketplace" CTA and returns the deal modal it
+ * opened — in this tab, or in a new one when the CTA opens the deal in a new tab.
+ */
+export async function openDealFromOpportunity(seller: SellerLeadPage): Promise<MarketplaceDealPage> {
+  const dealPage = new MarketplaceDealPage(await seller.clickViewInMarketplace());
+  await dealPage.expectLoaded();
+  return dealPage;
+}
+
+/** Closes a deal opened by `openDealFromOpportunity()`: its extra tab when it opened one, else just the modal. */
+export async function closeDealFromOpportunity(seller: SellerLeadPage, dealPage: MarketplaceDealPage): Promise<void> {
+  if (dealPage.page !== seller.page) await dealPage.closeTab();
+  else await dealPage.close();
+}
+
+/** Opens `mpdId` from Available as `franchise`, bids with `reason`, asserts the success toast and closes the modal. */
+export async function placeBidExpectingSuccess(
+  marketplace: MarketplacePage,
+  dealPage: MarketplaceDealPage,
+  mpdId: string,
+  reason: string,
+  franchise: string,
+): Promise<void> {
+  expect(
+    await openDealAs(marketplace, dealPage, mpdId, 'Available', franchise),
+    `${mpdId} in ${franchise}'s Available deals`,
+  ).toBe(true);
+  await dealPage.openPlaceBidConfirmation(reason);
+  await dealPage.submitPlaceBidConfirmation();
+  expect(await dealPage.waitForToastText()).toMatch(/successfully bid/i);
+  await dealPage.close();
 }

@@ -1,9 +1,9 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { Browser, BrowserContext, Page } from '@playwright/test';
-import { LoginPage } from '../modules/auth';
-import { Routes } from '../enums/routes.enum';
-import { envConfig } from '../config/env.config';
+import { LoginPage } from '@modules/auth';
+import { Routes } from '@enums/routes.enum';
+import { envConfig } from '@config/env.config';
 import { registerFinishLoggingInHandler } from './authHelper';
 
 /**
@@ -40,7 +40,7 @@ const ACCOUNT_ENV: Record<AccountKey, 'UGVILLE' | 'FRANCHISE_B' | 'BUYER' | 'COO
  * enough: navigating mid-hand-off (seen QA 2026-10-09 on the Franchise B
  * login) lands on a classic "URL No Longer Exists" page instead.
  */
-export const landedInUgville = (url: URL) => url.pathname.startsWith('/ugville') && !url.pathname.includes('/login');
+export const landedInUgville = (url: URL): boolean => url.pathname.startsWith('/ugville') && !url.pathname.includes('/login');
 
 export function getAccount(key: AccountKey): Account {
   const envPrefix = ACCOUNT_ENV[key];

@@ -1,6 +1,8 @@
 import { type Page, type Locator, expect } from '@playwright/test';
-import { BasePage } from '../../../shared/pages/base/BasePage';
-import { Routes } from '../../../enums/routes.enum';
+import { BasePage } from '@shared/pages/base/BasePage';
+import { Routes } from '@enums/routes.enum';
+import { Logger } from '@utils/logger';
+import { MarketplacePage } from '@modules/marketplace/pages/MarketplacePage';
 
 /**
  * Page Object for the Ugville Home / Dashboard Page.
@@ -21,8 +23,6 @@ type StageTileName = 'Lead Queue' | 'Contact' | 'Appointment' | 'Offer' | 'Contr
 type SellerOppsTabName = 'Opportunities' | 'Tasks' | 'Calendar';
 
 export class HomePage extends BasePage {
-  // ==================== Locators ====================
-
   /** Vendor Hub span element in the utility bar. */
   readonly vendorHubLink: Locator;
   /** Opens the New Seller Opportunity dropdown (New Contact / Existing Contact). */
@@ -82,8 +82,23 @@ export class HomePage extends BasePage {
    */
   readonly marketplaceQuickLink: Locator;
 
+  /**
+   * One of the 5 stage tiles rendered inside the Seller Opportunities card (Lead
+   * Queue/Contact/Appointment/Offer/Contract).
+   */
+  readonly getStageTile: (name: StageTileName) => Locator;
+  /** The Opportunities/Tasks/Calendar tab switcher inside the Seller Opportunities card. */
+  readonly getSellerOppsTabButton: (name: SellerOppsTabName) => Locator;
+  /**
+   * Quick-link paragraphs rendered under the New Seller Opportunities card (Franchise Referrals, System & Standards,
+   * Ethics Hotline, Vendor Hub, Podcast, HVA Give Back).
+   */
+  readonly getQuickLink: (name: string) => Locator;
+
   constructor(page: Page) {
     super(page);
+    // No data-testid exists in this UI (Salesforce LWR site; confirmed via live inspection of QA on 2026-10-27,
+    // shadow DOM included), so every locator below falls back to role/text/CSS.
     this.vendorHubLink = page.locator('span.slds-utility-bar__text', { hasText: 'Vendor Hub' });
     this.newSellerOpportunityButton = page.getByRole('button', { name: 'New Seller Opportunity' });
     this.newContactOption = page.getByText('New Contact', { exact: true });
@@ -105,40 +120,28 @@ export class HomePage extends BasePage {
     this.conventionBanner = page.locator('a[href*="hvaregistration.com"]').first();
     this.tasksList = page.locator('article').filter({ hasText: 'All Open' }).locator('li');
     this.marketplaceQuickLink = page.getByText(/^Marketplace\d*$/).first();
+    this.getStageTile = (name) => this.sellerOpportunitiesCard.getByText(name, { exact: true }).locator('..');
+    this.getSellerOppsTabButton = (name) => this.sellerOpportunitiesCard.getByRole('button', { name, exact: true });
+    this.getQuickLink = (name) => page.getByText(name, { exact: true }).first();
   }
-
-  /** One of the 5 stage tiles rendered inside the Seller Opportunities card (Lead Queue/Contact/Appointment/Offer/Contract). */
-  stageTile(name: StageTileName): Locator {
-    return this.sellerOpportunitiesCard.getByText(name, { exact: true }).locator('..');
-  }
-
-  /** The Opportunities/Tasks/Calendar tab switcher inside the Seller Opportunities card. */
-  sellerOppsTabButton(name: SellerOppsTabName): Locator {
-    return this.sellerOpportunitiesCard.getByRole('button', { name, exact: true });
-  }
-
-  /** Quick-link paragraphs rendered under the New Seller Opportunities card (Franchise Referrals, System & Standards, Ethics Hotline, Vendor Hub, Podcast, HVA Give Back). */
-  quickLink(name: string): Locator {
-    return this.page.getByText(name, { exact: true }).first();
-  }
-
-  // ==================== Actions ====================
 
   async getStageTileCount(name: StageTileName): Promise<number> {
-    const text = (await this.stageTile(name).textContent()) || '';
+    const text = (await this.getStageTile(name).textContent()) || '';
     const match = text.replace(name, '').match(/\d+/);
     return match ? parseInt(match[0], 10) : NaN;
   }
 
-  async clickStageTile(name: StageTileName) {
-    await this.stageTile(name).click();
+  async clickStageTile(name: StageTileName): Promise<void> {
+    await this.getStageTile(name).click();
   }
 
-  async clickSellerOppsTab(name: SellerOppsTabName) {
-    await this.sellerOppsTabButton(name).click();
+  async clickSellerOppsTab(name: SellerOppsTabName): Promise<void> {
+    await this.getSellerOppsTabButton(name).click();
   }
 
-  /** The trailing digit run on the Marketplace quick-link, or 0 if no badge is shown (no new deals since last login). */
+  /**
+   * The trailing digit run on the Marketplace quick-link, or 0 if no badge is shown (no new deals since last login).
+   */
   async getMarketplaceBadgeCount(): Promise<number> {
     const text = ((await this.marketplaceQuickLink.textContent().catch(() => '')) || '').trim();
     const match = text.match(/^Marketplace(\d+)$/);
@@ -158,7 +161,7 @@ export class HomePage extends BasePage {
    *   2. The "Recently Visited Leads" sidebar, which covers Home's own
    *      widgets (My People, Tasks, etc.) but doesn't affect other pages.
    */
-  async navigate() {
+  async navigate(): Promise<void> {
     await this.page.goto(Routes.HOME);
     await this.page.waitForLoadState('domcontentloaded');
     await this.page.waitForTimeout(3000);
@@ -166,31 +169,49 @@ export class HomePage extends BasePage {
     await this.closeRecentlyVisitedLeadsIfOpen();
   }
 
+  /** Opens Home and waits for its Salesforce spinner to clear — the clean starting point for most tests. */
+  async openAndSettle(): Promise<void> {
+    await this.navigate();
+    await this.waitForSpinner();
+  }
+
+  /** Clicks the Marketplace quick link and returns the Marketplace opened in the new tab it spawns. */
+  async openMarketplaceQuickLinkInNewTab(): Promise<MarketplacePage> {
+    const newTab = this.page.context().waitForEvent('page', { timeout: 15000 });
+    await this.marketplaceQuickLink.click();
+    return new MarketplacePage(await newTab);
+  }
+
+  /** Returns to Home after a test without failing it if the navigation is interrupted. */
+  async returnHomeQuietly(): Promise<void> {
+    await this.page.goto(Routes.HOME).catch(() => {});
+  }
+
   /** Go to Vendor Hub via the utility bar link (see `VendorHomePage`). */
-  async clickVendorHub() {
+  async clickVendorHub(): Promise<void> {
     await this.vendorHubLink.click();
   }
 
   /** Open the New Seller Opportunity dropdown. */
-  async clickNewSellerOpportunity() {
+  async clickNewSellerOpportunity(): Promise<void> {
     await this.waitForSpinner(30000);
     await this.newSellerOpportunityButton.click({ force: true });
   }
 
   /** Pick "New Contact" from an already-open New Seller Opportunity dropdown. */
-  async selectNewContact() {
+  async selectNewContact(): Promise<void> {
     await this.newContactOption.waitFor({ state: 'visible', timeout: 30000 });
     await this.newContactOption.click({ force: true });
   }
 
   /** Pick "Existing Contact" from an already-open New Seller Opportunity dropdown. */
-  async selectExistingContact() {
+  async selectExistingContact(): Promise<void> {
     await this.existingContactOption.waitFor({ state: 'visible', timeout: 30000 });
     await this.existingContactOption.click({ force: true });
   }
 
   /** Full Step 2: Click New Seller Opportunity → New Contact */
-  async startNewOpportunityWithNewContact() {
+  async startNewOpportunityWithNewContact(): Promise<void> {
     await this.closeRecentlyVisitedLeadsIfOpen();
     await this.waitForSpinner(30000);
 
@@ -202,7 +223,7 @@ export class HomePage extends BasePage {
         opened = true;
         break;
       }
-      console.log(`Retrying New Seller Opportunity click (attempt ${i + 1})...`);
+      Logger.warn(`Retrying New Seller Opportunity click (attempt ${i + 1})...`);
     }
 
     if (!opened) {
@@ -221,7 +242,7 @@ export class HomePage extends BasePage {
   }
 
   /** Full Step 2: Click New Seller Opportunity → Existing Contact */
-  async startNewOpportunityWithExistingContact() {
+  async startNewOpportunityWithExistingContact(): Promise<void> {
     await this.waitForSpinner(30000);
 
     let opened = false;
@@ -232,7 +253,7 @@ export class HomePage extends BasePage {
         opened = true;
         break;
       }
-      console.log(`Retrying New Seller Opportunity click (attempt ${i + 1})...`);
+      Logger.warn(`Retrying New Seller Opportunity click (attempt ${i + 1})...`);
     }
 
     if (!opened) {
@@ -250,7 +271,9 @@ export class HomePage extends BasePage {
     await this.existingContactOption.click({ force: true });
   }
 
-  /** Open the first Contact from the New Seller Opportunities table's "Contact" column. Returns the contact's link text. */
+  /**
+   * Open the first Contact from the New Seller Opportunities table's "Contact" column. Returns the contact's link text.
+   */
   async openFirstOpportunityContact(): Promise<string> {
     const link = this.firstOpportunityContactLink;
     await link.waitFor({ state: 'visible', timeout: 30000 });
@@ -259,7 +282,10 @@ export class HomePage extends BasePage {
     return title;
   }
 
-  /** Open the first Project from the New Seller Opportunities table's "Property" column. Returns the project's link text. */
+  /**
+   * Open the first Project from the New Seller Opportunities table's "Property" column. Returns the project's link
+   * text.
+   */
   async openFirstOpportunityProject(): Promise<string> {
     const link = this.firstOpportunityProjectLink;
     await link.waitFor({ state: 'visible', timeout: 30000 });
@@ -268,9 +294,7 @@ export class HomePage extends BasePage {
     return title;
   }
 
-  // ==================== Assertions ====================
-
-  async expectDashboardVisible() {
+  async expectDashboardVisible(): Promise<void> {
     await this.waitForSpinner(30000);
     await expect(this.newSellerOpportunityButton).toBeVisible({ timeout: 30000 });
   }

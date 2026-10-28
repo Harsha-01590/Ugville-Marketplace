@@ -1,5 +1,5 @@
 import { type Page } from '@playwright/test';
-import { LoginPage } from '../modules/auth';
+import { LoginPage } from '@modules/auth';
 
 /**
  * Salesforce Experience Cloud occasionally routes an authenticated

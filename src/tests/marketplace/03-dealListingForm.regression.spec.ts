@@ -1,13 +1,15 @@
-import { test, expect } from '../../fixtures/testFixtures';
-import type { Page } from '@playwright/test';
-import type { HomePage } from '../../modules/dashboard';
-import type { SellerLeadPage, MarketplaceDealType } from '../../modules/seller';
-import type { MarketplacePage, MarketplaceDealPage } from '../../modules/marketplace';
-import type { TestData } from '../../fixtures/testFixtures';
-import { envConfig } from '../../config/env.config';
-import { SellerLeadPage as SellerLeadPageClass } from '../../modules/seller';
-import { listWithDirectInvite, openDealAs, opportunityIdFrom } from '../../utils/directInvite';
-import { tileWindow } from '../../utils/windowLayout';
+import { test, expect } from '@fixtures/testFixtures';
+import { envConfig } from '@config/env.config';
+import {
+  allOrNone,
+  franchiseBaseName,
+  franchiseSearchTerm,
+  labelsMissingTerm,
+  uniqueDealTerms,
+} from '@modules/seller';
+import { listFreshDeal, listWithRequiredFieldsOnly, openDealAs } from '@utils/directInvite';
+import { tileWindow } from '@utils/windowLayout';
+import { Logger } from '@utils/logger';
 
 /**
  * Workflow suite for the Marketplace_Master sheet's workflow:
@@ -47,78 +49,11 @@ import { tileWindow } from '../../utils/windowLayout';
  * mutation (see 08-biddingPlaceBid.regression.spec.ts).
  */
 
-const FORM_TEST_OPPORTUNITY_ID = envConfig.MARKETPLACE_FORM_TEST_OPPORTUNITY_ID;
-const FORM_TEST_OPPORTUNITY_LOCATION = envConfig.MARKETPLACE_FORM_TEST_OPPORTUNITY_LOCATION;
+const FORM_FIXTURE = {
+  id: envConfig.MARKETPLACE_FORM_TEST_OPPORTUNITY_ID,
+  location: envConfig.MARKETPLACE_FORM_TEST_OPPORTUNITY_LOCATION,
+};
 const DIRECT_INVITE_SEARCH_TERM = envConfig.MARKETPLACE_DIRECT_INVITE_SEARCH_TERM;
-
-async function resetToHome(page: Page, homePage: HomePage, data: TestData) {
-  await homePage.navigate();
-  await page.waitForLoadState('domcontentloaded');
-  await page.waitForTimeout(data.timeouts.settle);
-}
-
-async function settleAfter(authedPage: Page, data: TestData) {
-  await authedPage.waitForTimeout(data.timeouts.afterEach);
-}
-
-let freshFormOp = '';
-let formFixtureUsable = !!FORM_TEST_OPPORTUNITY_ID;
-
-/**
- * Opens a still-unlisted Opportunity's "New Deal" dialog at step 1 (deal type) and returns its
- * expected Location ('' when not known up front). Uses the configured form-test fixture while it
- * is unlisted, otherwise one fresh seller op per run — these tests only ever cancel, so it stays
- * unlisted and serves them all.
- */
-async function openDealTypeStep(seller: SellerLeadPage, home: HomePage): Promise<string> {
-  if (formFixtureUsable) {
-    await seller.navigateById(FORM_TEST_OPPORTUNITY_ID);
-    // Seen QA 2026-10-11: the fixture record is gone ("requested resource does not exist") — stop trying it.
-    if ((await seller.isRecordShown()) && (await seller.isListInMarketplaceCtaShown())) {
-      await seller.clickMarketplaceCta();
-      return FORM_TEST_OPPORTUNITY_LOCATION;
-    }
-    formFixtureUsable = false;
-  }
-  if (freshFormOp) await seller.navigateById(freshFormOp);
-  else {
-    await seller.createFromHome(home, envConfig.FRANCHISE_A_NAME);
-    freshFormOp = opportunityIdFrom(seller.page.url());
-  }
-  expect(await seller.isListInMarketplaceCtaShown(), 'seller op offers "List in Marketplace"').toBe(true);
-  await seller.clickMarketplaceCta();
-  return '';
-}
-
-/** Same, straight to step 2 (deal details, as Assignment). */
-async function openDealForm(seller: SellerLeadPage, home: HomePage): Promise<string> {
-  const location = await openDealTypeStep(seller, home);
-  await seller.marketplaceListing.selectDealType('Assignment');
-  return location;
-}
-
-/** LF_013-015: lists a fresh seller op as `type` with only the required fields (no ARV, no Direct Invite) and checks the result. */
-async function listWithRequiredFieldsOnly(
-  type: MarketplaceDealType,
-  home: HomePage,
-  seller: SellerLeadPage,
-  marketplace: MarketplacePage,
-  dealPage: MarketplaceDealPage,
-) {
-  const deal = await listWithDirectInvite(home, seller, marketplace, dealPage, type, '');
-  expect(deal, 'fresh seller op offers "List in Marketplace"').not.toBeNull();
-  // The app words it "<Type> Deal listed to Marketplace successfully." (sheet: "The <type> deal listed…").
-  expect(deal!.listToast, 'success toast').toMatch(new RegExp(`${type} deal listed to Marketplace successfully`, 'i'));
-  const text = await dealPage.getDealDialogText();
-  expect(text, 'Estimated ARV left blank').toContain('Estimated ARV: N/A');
-  expect((await dealPage.getAdditionalFields())['Deal Stage'], 'no Direct Invite').not.toBe('Direct');
-  const badge = await dealPage.getDealTypeBadge();
-  console.log(`  [Form] ${deal!.mpdId} listed as ${type}, badge "${badge}"`);
-  await dealPage.close();
-  await seller.navigateById(deal!.oppId);
-  await expect.poll(() => seller.getMarketplaceCtaText(), { timeout: 30000 }).toMatch(/^View (in )?Marketplace/);
-  return badge;
-}
 
 test.describe('Deal Listing Form (List in Marketplace) — New Deal wizard @regression @MarketplaceDealListingForm', () => {
   test.describe.configure({ timeout: 300_000 }); // the first test may create the shared fresh seller op
@@ -131,15 +66,15 @@ test.describe('Deal Listing Form (List in Marketplace) — New Deal wizard @regr
   test(
     'New Deal modal shows correct title, label, and type descriptions @regression',
     { tag: '@FORM-01' },
-    async ({ authedPage, data, authedHomePage, authedSellerLeadPage }) => {
+    async ({ authedHomePage, authedSellerLeadPage }) => {
       await test.step('Open the New Deal dialog on an unlisted seller op', async () => {
-        await resetToHome(authedPage, authedHomePage, data);
-        await openDealTypeStep(authedSellerLeadPage, authedHomePage);
+        await authedHomePage.openAndSettle();
+        await authedSellerLeadPage.openUnlistedDealTypeStep(authedHomePage, FORM_FIXTURE);
       });
 
       await test.step('Verify the title, prompt, type descriptions and buttons', async () => {
         await authedSellerLeadPage.marketplaceListing.expectDealTypeStepContent();
-        console.log(
+        Logger.log(
           '"New Deal" title, "List this Marketplace Deal as:" prompt, both type descriptions and Cancel/Next all shown',
         );
       });
@@ -147,8 +82,6 @@ test.describe('Deal Listing Form (List in Marketplace) — New Deal wizard @regr
       await test.step('Cancel the dialog', async () => {
         await authedSellerLeadPage.marketplaceListing.cancelDealTypeStep();
       });
-
-      await settleAfter(authedPage, data);
     },
   );
 
@@ -156,18 +89,18 @@ test.describe('Deal Listing Form (List in Marketplace) — New Deal wizard @regr
   test(
     'No listing type is pre-selected by default @regression',
     { tag: '@FORM-02' },
-    async ({ authedPage, data, authedHomePage, authedSellerLeadPage }) => {
+    async ({ authedHomePage, authedSellerLeadPage }) => {
       const listing = authedSellerLeadPage.marketplaceListing;
 
       await test.step('Open the New Deal dialog on an unlisted seller op', async () => {
-        await resetToHome(authedPage, authedHomePage, data);
-        await openDealTypeStep(authedSellerLeadPage, authedHomePage);
+        await authedHomePage.openAndSettle();
+        await authedSellerLeadPage.openUnlistedDealTypeStep(authedHomePage, FORM_FIXTURE);
       });
 
       await test.step('Verify neither Assignment nor Opportunity is selected', async () => {
         const assignment = await listing.isDealTypeSelected('Assignment');
         const opportunity = await listing.isDealTypeSelected('Opportunity');
-        console.log(`Assignment selected=${assignment}, Opportunity selected=${opportunity}`);
+        Logger.log(`Assignment selected=${assignment}, Opportunity selected=${opportunity}`);
         expect(assignment).toBe(false);
         expect(opportunity).toBe(false);
       });
@@ -175,8 +108,6 @@ test.describe('Deal Listing Form (List in Marketplace) — New Deal wizard @regr
       await test.step('Cancel the dialog', async () => {
         await listing.cancelDealTypeStep();
       });
-
-      await settleAfter(authedPage, data);
     },
   );
 
@@ -184,23 +115,21 @@ test.describe('Deal Listing Form (List in Marketplace) — New Deal wizard @regr
   test(
     'Next is disabled until a listing type is selected @regression',
     { tag: '@FORM-03' },
-    async ({ authedPage, data, authedHomePage, authedSellerLeadPage }) => {
+    async ({ authedHomePage, authedSellerLeadPage }) => {
       await test.step('Open the New Deal dialog on an unlisted seller op', async () => {
-        await resetToHome(authedPage, authedHomePage, data);
-        await openDealTypeStep(authedSellerLeadPage, authedHomePage);
+        await authedHomePage.openAndSettle();
+        await authedSellerLeadPage.openUnlistedDealTypeStep(authedHomePage, FORM_FIXTURE);
       });
 
       await test.step('Verify Next is disabled with no type selected', async () => {
         const enabled = await authedSellerLeadPage.marketplaceListing.isNextEnabled();
-        console.log(`Next enabled with no type selected = ${enabled}`);
+        Logger.log(`Next enabled with no type selected = ${enabled}`);
         expect(enabled).toBe(false);
       });
 
       await test.step('Cancel the dialog', async () => {
         await authedSellerLeadPage.marketplaceListing.cancelDealTypeStep();
       });
-
-      await settleAfter(authedPage, data);
     },
   );
 
@@ -208,17 +137,17 @@ test.describe('Deal Listing Form (List in Marketplace) — New Deal wizard @regr
   test(
     'Assignment/Opportunity radios are mutually exclusive @regression',
     { tag: '@FORM-04' },
-    async ({ authedPage, data, authedHomePage, authedSellerLeadPage }) => {
+    async ({ authedHomePage, authedSellerLeadPage }) => {
       const listing = authedSellerLeadPage.marketplaceListing;
 
       await test.step('Open the New Deal dialog on an unlisted seller op', async () => {
-        await resetToHome(authedPage, authedHomePage, data);
-        await openDealTypeStep(authedSellerLeadPage, authedHomePage);
+        await authedHomePage.openAndSettle();
+        await authedSellerLeadPage.openUnlistedDealTypeStep(authedHomePage, FORM_FIXTURE);
       });
 
       await test.step('Choose Assignment — only Assignment is selected and Next is enabled', async () => {
         await listing.chooseDealType('Assignment');
-        console.log(
+        Logger.log(
           `After Assignment — Assignment=${await listing.isDealTypeSelected('Assignment')}, Opportunity=${await listing.isDealTypeSelected('Opportunity')}`,
         );
         expect(await listing.isDealTypeSelected('Assignment')).toBe(true);
@@ -228,7 +157,7 @@ test.describe('Deal Listing Form (List in Marketplace) — New Deal wizard @regr
 
       await test.step('Choose Opportunity — only Opportunity is selected and Next is enabled', async () => {
         await listing.chooseDealType('Opportunity');
-        console.log(
+        Logger.log(
           `After Opportunity — Assignment=${await listing.isDealTypeSelected('Assignment')}, Opportunity=${await listing.isDealTypeSelected('Opportunity')}`,
         );
         expect(await listing.isDealTypeSelected('Opportunity')).toBe(true);
@@ -239,8 +168,6 @@ test.describe('Deal Listing Form (List in Marketplace) — New Deal wizard @regr
       await test.step('Cancel the dialog', async () => {
         await listing.cancelDealTypeStep();
       });
-
-      await settleAfter(authedPage, data);
     },
   );
 
@@ -248,10 +175,10 @@ test.describe('Deal Listing Form (List in Marketplace) — New Deal wizard @regr
   test(
     'Cancel on the type-selection screen creates no deal @regression',
     { tag: '@FORM-05' },
-    async ({ authedPage, data, authedHomePage, authedSellerLeadPage }) => {
+    async ({ authedHomePage, authedSellerLeadPage }) => {
       await test.step('Open the New Deal dialog on an unlisted seller op', async () => {
-        await resetToHome(authedPage, authedHomePage, data);
-        await openDealTypeStep(authedSellerLeadPage, authedHomePage);
+        await authedHomePage.openAndSettle();
+        await authedSellerLeadPage.openUnlistedDealTypeStep(authedHomePage, FORM_FIXTURE);
       });
 
       await test.step('Choose Assignment, then Cancel', async () => {
@@ -261,13 +188,11 @@ test.describe('Deal Listing Form (List in Marketplace) — New Deal wizard @regr
 
       await test.step('Verify the CTA still reads "List in Marketplace"', async () => {
         const ctaAfterCancel = await authedSellerLeadPage.getMarketplaceCtaText();
-        console.log(`CTA after step-1 Cancel = "${ctaAfterCancel}"`);
+        Logger.log(`CTA after step-1 Cancel = "${ctaAfterCancel}"`);
         expect(ctaAfterCancel, 'Cancel must leave the CTA reading "List in Marketplace" — no deal was created').toBe(
           'List in Marketplace',
         );
       });
-
-      await settleAfter(authedPage, data);
     },
   );
 
@@ -283,12 +208,12 @@ test.describe('Deal Listing Form (List in Marketplace) — New Deal wizard @regr
     test(
       `Next with ${type} selected opens the deal details screen @regression`,
       { tag },
-      async ({ authedPage, data, authedHomePage, authedSellerLeadPage }) => {
+      async ({ authedHomePage, authedSellerLeadPage }) => {
         const listing = authedSellerLeadPage.marketplaceListing;
 
         await test.step('Open the New Deal dialog on an unlisted seller op', async () => {
-          await resetToHome(authedPage, authedHomePage, data);
-          await openDealTypeStep(authedSellerLeadPage, authedHomePage);
+          await authedHomePage.openAndSettle();
+          await authedSellerLeadPage.openUnlistedDealTypeStep(authedHomePage, FORM_FIXTURE);
         });
 
         await test.step(`Choose ${type} and click Next`, async () => {
@@ -298,7 +223,7 @@ test.describe('Deal Listing Form (List in Marketplace) — New Deal wizard @regr
 
         await test.step('Verify the deal details heading and fields', async () => {
           const heading = await listing.getFormHeadingText();
-          console.log(`${id} deal details heading = "${heading}"`);
+          Logger.log(`${id} deal details heading = "${heading}"`);
           // App text (QA 2026-10-21): Assignment reads "New Assignment Deal", Opportunity a plain "New Deal".
           expect(heading).toBe(type === 'Assignment' ? 'New Assignment Deal' : 'New Deal');
           await listing.expectDealFormFieldsVisible();
@@ -307,8 +232,6 @@ test.describe('Deal Listing Form (List in Marketplace) — New Deal wizard @regr
         await test.step('Cancel and close the form', async () => {
           await listing.cancelAndClose();
         });
-
-        await settleAfter(authedPage, data);
       },
     );
   }
@@ -317,12 +240,12 @@ test.describe('Deal Listing Form (List in Marketplace) — New Deal wizard @regr
   test(
     'Back retains the previously selected listing type @regression',
     { tag: '@FORM-08' },
-    async ({ authedPage, data, authedHomePage, authedSellerLeadPage }) => {
+    async ({ authedHomePage, authedSellerLeadPage }) => {
       const listing = authedSellerLeadPage.marketplaceListing;
 
       await test.step('Open the New Deal dialog on an unlisted seller op', async () => {
-        await resetToHome(authedPage, authedHomePage, data);
-        await openDealTypeStep(authedSellerLeadPage, authedHomePage);
+        await authedHomePage.openAndSettle();
+        await authedSellerLeadPage.openUnlistedDealTypeStep(authedHomePage, FORM_FIXTURE);
       });
 
       await test.step('Choose Opportunity, click Next, then Back', async () => {
@@ -334,7 +257,7 @@ test.describe('Deal Listing Form (List in Marketplace) — New Deal wizard @regr
       await test.step('Verify Opportunity is still selected', async () => {
         const opportunity = await listing.isDealTypeSelected('Opportunity');
         const assignment = await listing.isDealTypeSelected('Assignment');
-        console.log(`After Back — Opportunity selected=${opportunity}, Assignment selected=${assignment}`);
+        Logger.log(`After Back — Opportunity selected=${opportunity}, Assignment selected=${assignment}`);
         expect(opportunity).toBe(true);
         expect(assignment).toBe(false);
       });
@@ -342,8 +265,6 @@ test.describe('Deal Listing Form (List in Marketplace) — New Deal wizard @regr
       await test.step('Cancel the dialog', async () => {
         await listing.cancelDealTypeStep();
       });
-
-      await settleAfter(authedPage, data);
     },
   );
 
@@ -355,10 +276,10 @@ test.describe('Deal Listing Form (List in Marketplace) — New Deal wizard @regr
   test(
     'Cancel on the listing form discards input and creates no deal @regression',
     { tag: '@FORM-09' },
-    async ({ authedPage, data, authedHomePage, authedSellerLeadPage }) => {
+    async ({ authedHomePage, authedSellerLeadPage }) => {
       await test.step('Open the New Deal form (Assignment) on an unlisted seller op', async () => {
-        await resetToHome(authedPage, authedHomePage, data);
-        await openDealForm(authedSellerLeadPage, authedHomePage);
+        await authedHomePage.openAndSettle();
+        await authedSellerLeadPage.openUnlistedDealForm(authedHomePage, FORM_FIXTURE);
       });
 
       await test.step('Fill Deal Terms and Opportunity Details, then Cancel', async () => {
@@ -371,13 +292,11 @@ test.describe('Deal Listing Form (List in Marketplace) — New Deal wizard @regr
 
       await test.step('Verify the CTA still reads "List in Marketplace"', async () => {
         const ctaAfterCancel = await authedSellerLeadPage.getMarketplaceCtaText();
-        console.log(`CTA after Cancel = "${ctaAfterCancel}"`);
+        Logger.log(`CTA after Cancel = "${ctaAfterCancel}"`);
         expect(ctaAfterCancel, 'Cancel must leave the CTA reading "List in Marketplace" — no deal was created').toBe(
           'List in Marketplace',
         );
       });
-
-      await settleAfter(authedPage, data);
     },
   );
 
@@ -385,10 +304,10 @@ test.describe('Deal Listing Form (List in Marketplace) — New Deal wizard @regr
   test(
     'Location is pre-filled from the property address and non-editable @regression',
     { tag: '@FORM-10' },
-    async ({ authedPage, data, authedHomePage, authedSellerLeadPage }) => {
+    async ({ authedHomePage, authedSellerLeadPage }) => {
       const location = await test.step('Open the New Deal form (Assignment) on an unlisted seller op', async () => {
-        await resetToHome(authedPage, authedHomePage, data);
-        return openDealForm(authedSellerLeadPage, authedHomePage);
+        await authedHomePage.openAndSettle();
+        return authedSellerLeadPage.openUnlistedDealForm(authedHomePage, FORM_FIXTURE);
       });
 
       await test.step('Verify Location is pre-filled and disabled', async () => {
@@ -396,15 +315,13 @@ test.describe('Deal Listing Form (List in Marketplace) — New Deal wizard @regr
         else
           expect(await authedSellerLeadPage.marketplaceListing.getLocationValue()).toMatch(/^[^,]+, [A-Z]{2} \d{5}$/);
         const disabled = await authedSellerLeadPage.marketplaceListing.isLocationDisabled();
-        console.log(`Disabled=${disabled}`);
+        Logger.log(`Disabled=${disabled}`);
         expect(disabled).toBe(true);
       });
 
       await test.step('Cancel and close the form', async () => {
         await authedSellerLeadPage.marketplaceListing.cancelAndClose();
       });
-
-      await settleAfter(authedPage, data);
     },
   );
 
@@ -412,13 +329,13 @@ test.describe('Deal Listing Form (List in Marketplace) — New Deal wizard @regr
   test(
     'Deal Terms and Opportunity Details accept alphanumeric and special characters @regression',
     { tag: '@FORM-11' },
-    async ({ authedPage, data, authedHomePage, authedSellerLeadPage }) => {
+    async ({ authedHomePage, authedSellerLeadPage }) => {
       const dealTerms = 'Cash offer, 30-day close! #priority @seller';
       const oppDetails = '3 bed / 2 bath, ~1,450 sq ft (est.)';
 
       await test.step('Open the New Deal form (Assignment) on an unlisted seller op', async () => {
-        await resetToHome(authedPage, authedHomePage, data);
-        await openDealForm(authedSellerLeadPage, authedHomePage);
+        await authedHomePage.openAndSettle();
+        await authedSellerLeadPage.openUnlistedDealForm(authedHomePage, FORM_FIXTURE);
       });
 
       await test.step('Fill Deal Terms and Opportunity Details with special characters', async () => {
@@ -429,7 +346,7 @@ test.describe('Deal Listing Form (List in Marketplace) — New Deal wizard @regr
       await test.step('Verify both fields keep the text exactly', async () => {
         const dealTermsValue = await authedSellerLeadPage.marketplaceListing.getDealTermsValue();
         const oppDetailsValue = await authedSellerLeadPage.marketplaceListing.getOpportunityDetailsValue();
-        console.log(`Deal Terms="${dealTermsValue}", Opportunity Details="${oppDetailsValue}"`);
+        Logger.log(`Deal Terms="${dealTermsValue}", Opportunity Details="${oppDetailsValue}"`);
         expect(dealTermsValue).toBe(dealTerms);
         expect(oppDetailsValue).toBe(oppDetails);
       });
@@ -437,8 +354,6 @@ test.describe('Deal Listing Form (List in Marketplace) — New Deal wizard @regr
       await test.step('Cancel and close the form', async () => {
         await authedSellerLeadPage.marketplaceListing.cancelAndClose();
       });
-
-      await settleAfter(authedPage, data);
     },
   );
 
@@ -446,19 +361,19 @@ test.describe('Deal Listing Form (List in Marketplace) — New Deal wizard @regr
   test(
     'Estimated ARV accepts numeric + comma, rejects letters/symbols @regression',
     { tag: '@FORM-12' },
-    async ({ authedPage, data, authedHomePage, authedSellerLeadPage }) => {
+    async ({ authedHomePage, authedSellerLeadPage }) => {
       const arv = authedSellerLeadPage.marketplaceListing;
 
       await test.step('Open the New Deal form (Assignment) on an unlisted seller op', async () => {
-        await resetToHome(authedPage, authedHomePage, data);
-        await openDealForm(authedSellerLeadPage, authedHomePage);
+        await authedHomePage.openAndSettle();
+        await authedSellerLeadPage.openUnlistedDealForm(authedHomePage, FORM_FIXTURE);
       });
 
       // EG_012 — numeric + comma accepted.
       await test.step('Numeric with a comma is accepted', async () => {
         await arv.typeEstimatedArv('250,000');
         const value = await arv.getEstimatedArvValue();
-        console.log(`After "250,000" -> "${value}"`);
+        Logger.log(`After "250,000" -> "${value}"`);
         expect(value).toBe('250,000');
         await arv.clearEstimatedArv();
       });
@@ -467,7 +382,7 @@ test.describe('Deal Listing Form (List in Marketplace) — New Deal wizard @regr
       await test.step('Letters are rejected', async () => {
         await arv.typeEstimatedArv('abc');
         const value = await arv.getEstimatedArvValue();
-        console.log(`After "abc" -> "${value}"`);
+        Logger.log(`After "abc" -> "${value}"`);
         expect(value).not.toMatch(/^abc$/);
         await arv.clearEstimatedArv();
       });
@@ -476,7 +391,7 @@ test.describe('Deal Listing Form (List in Marketplace) — New Deal wizard @regr
       await test.step('Special characters other than comma are rejected', async () => {
         await arv.typeEstimatedArv('$25%0#0');
         const value = await arv.getEstimatedArvValue();
-        console.log(`After "$25%0#0" -> "${value}"`);
+        Logger.log(`After "$25%0#0" -> "${value}"`);
         expect(value).not.toMatch(/[$%#]/);
         await arv.clearEstimatedArv();
       });
@@ -487,7 +402,7 @@ test.describe('Deal Listing Form (List in Marketplace) — New Deal wizard @regr
       await test.step('Decimals are accepted (known bug)', async () => {
         await arv.typeEstimatedArv('250000.50');
         const value = await arv.getEstimatedArvValue();
-        console.log(`[KNOWN BUG] after "250000.50" -> "${value}" (expected: decimals rejected; app accepts them)`);
+        Logger.log(`[KNOWN BUG] after "250000.50" -> "${value}" (expected: decimals rejected; app accepts them)`);
         expect(value).toBe('250000.50');
         await arv.clearEstimatedArv();
       });
@@ -495,8 +410,6 @@ test.describe('Deal Listing Form (List in Marketplace) — New Deal wizard @regr
       await test.step('Cancel and close the form', async () => {
         await arv.cancelAndClose();
       });
-
-      await settleAfter(authedPage, data);
     },
   );
 
@@ -504,23 +417,21 @@ test.describe('Deal Listing Form (List in Marketplace) — New Deal wizard @regr
   test(
     'Direct Invite field is present on the listing form @regression',
     { tag: '@FORM-13' },
-    async ({ authedPage, data, authedHomePage, authedSellerLeadPage }) => {
+    async ({ authedHomePage, authedSellerLeadPage }) => {
       await test.step('Open the New Deal form (Assignment) on an unlisted seller op', async () => {
-        await resetToHome(authedPage, authedHomePage, data);
-        await openDealForm(authedSellerLeadPage, authedHomePage);
+        await authedHomePage.openAndSettle();
+        await authedSellerLeadPage.openUnlistedDealForm(authedHomePage, FORM_FIXTURE);
       });
 
       await test.step('Verify the Direct Invite field is visible', async () => {
         const visible = await authedSellerLeadPage.marketplaceListing.isDirectInviteVisible();
-        console.log(`Direct Invite field visible = ${visible}`);
+        Logger.log(`Direct Invite field visible = ${visible}`);
         expect(visible).toBe(true);
       });
 
       await test.step('Cancel and close the form', async () => {
         await authedSellerLeadPage.marketplaceListing.cancelAndClose();
       });
-
-      await settleAfter(authedPage, data);
     },
   );
 
@@ -528,23 +439,21 @@ test.describe('Deal Listing Form (List in Marketplace) — New Deal wizard @regr
   test(
     'Direct Invite search filters franchisee results while typing @regression',
     { tag: '@FORM-14' },
-    async ({ authedPage, data, authedHomePage, authedSellerLeadPage }) => {
+    async ({ authedHomePage, authedSellerLeadPage }) => {
       const listing = authedSellerLeadPage.marketplaceListing;
-      const searchTerm = DIRECT_INVITE_SEARCH_TERM || envConfig.FRANCHISE_B_NAME.split(/[\s,]+/)[0];
+      const searchTerm = DIRECT_INVITE_SEARCH_TERM || franchiseSearchTerm(envConfig.FRANCHISE_B_NAME);
 
       await test.step('Open the New Deal form (Assignment) on an unlisted seller op', async () => {
-        await resetToHome(authedPage, authedHomePage, data);
-        await openDealForm(authedSellerLeadPage, authedHomePage);
+        await authedHomePage.openAndSettle();
+        await authedSellerLeadPage.openUnlistedDealForm(authedHomePage, FORM_FIXTURE);
       });
 
       await test.step(`Search Direct Invite for "${searchTerm}" and verify the suggestions match`, async () => {
         await listing.searchDirectInvite(searchTerm);
         const labels = await listing.getDirectInviteOptionLabels();
-        console.log(`Suggestions for "${searchTerm}" = ${JSON.stringify(labels)}`);
+        Logger.log(`Suggestions for "${searchTerm}" = ${JSON.stringify(labels)}`);
         expect(labels.length).toBeGreaterThan(0);
-        for (const label of labels) {
-          expect(label.toLowerCase()).toContain(searchTerm.toLowerCase());
-        }
+        expect(labelsMissingTerm(labels, searchTerm), `every suggestion contains "${searchTerm}"`).toEqual([]);
         expect(labels, 'the Listing Franchise is never offered').not.toContain(envConfig.FRANCHISE_A_NAME);
       });
 
@@ -552,7 +461,7 @@ test.describe('Deal Listing Form (List in Marketplace) — New Deal wizard @regr
         const picked = await listing.selectDirectInviteOption(0);
         // Live-verified QA 2026-10-21: the pick fills the Direct Invite input itself (no separate pill text).
         const shown = await listing.getDirectInviteValue();
-        console.log(`Picked "${picked}" — Direct Invite field now holds "${shown}"`);
+        Logger.log(`Picked "${picked}" — Direct Invite field now holds "${shown}"`);
         expect(shown).toBe(picked);
         expect(await listing.hasDirectInviteSelection(), 'a clear (✕) button appears for the pick').toBe(true);
       });
@@ -560,8 +469,6 @@ test.describe('Deal Listing Form (List in Marketplace) — New Deal wizard @regr
       await test.step('Cancel and close the form', async () => {
         await listing.cancelAndClose();
       });
-
-      await settleAfter(authedPage, data);
     },
   );
 });
@@ -575,12 +482,12 @@ test.describe('Deal Listing Form (List in Marketplace) — Save validation and r
   test(
     'Deal Terms is mandatory @regression',
     { tag: '@FORM-15' },
-    async ({ authedPage, data, authedHomePage, authedSellerLeadPage }) => {
+    async ({ authedHomePage, authedSellerLeadPage }) => {
       const listing = authedSellerLeadPage.marketplaceListing;
 
       await test.step('Open the New Deal form (Assignment) on an unlisted seller op', async () => {
-        await resetToHome(authedPage, authedHomePage, data);
-        await openDealForm(authedSellerLeadPage, authedHomePage);
+        await authedHomePage.openAndSettle();
+        await authedSellerLeadPage.openUnlistedDealForm(authedHomePage, FORM_FIXTURE);
       });
 
       await test.step('Fill only Opportunity Details and click Save', async () => {
@@ -592,12 +499,12 @@ test.describe('Deal Listing Form (List in Marketplace) — Save validation and r
         const open = await listing.isDealFormOpen();
         const required = await listing.isDealTermsRequired();
         const invalid = await listing.isDealTermsInvalid();
-        console.log(`Form still open=${open}, Deal Terms required=${required}, invalid=${invalid}`);
+        Logger.log(`Form still open=${open}, Deal Terms required=${required}, invalid=${invalid}`);
         expect(open, 'Save must be blocked while Deal Terms is empty').toBe(true);
         expect(required).toBe(true);
         // Seen QA 2026-10-11: Save is refused with a toast; the empty field itself is not marked invalid.
         await expect(
-          authedSellerLeadPage.messageText('Please fill in all required fields.'),
+          authedSellerLeadPage.getMessageText('Please fill in all required fields.'),
           'Save refused with a validation error',
         ).toBeVisible({ timeout: 10000 });
       });
@@ -605,8 +512,6 @@ test.describe('Deal Listing Form (List in Marketplace) — Save validation and r
       await test.step('Cancel and close the form', async () => {
         await listing.cancelAndClose();
       });
-
-      await settleAfter(authedPage, data);
     },
   );
 
@@ -614,12 +519,12 @@ test.describe('Deal Listing Form (List in Marketplace) — Save validation and r
   test(
     'Opportunity Details is mandatory @regression',
     { tag: '@FORM-16' },
-    async ({ authedPage, data, authedHomePage, authedSellerLeadPage }) => {
+    async ({ authedHomePage, authedSellerLeadPage }) => {
       const listing = authedSellerLeadPage.marketplaceListing;
 
       await test.step('Open the New Deal form (Assignment) on an unlisted seller op', async () => {
-        await resetToHome(authedPage, authedHomePage, data);
-        await openDealForm(authedSellerLeadPage, authedHomePage);
+        await authedHomePage.openAndSettle();
+        await authedSellerLeadPage.openUnlistedDealForm(authedHomePage, FORM_FIXTURE);
       });
 
       await test.step('Fill only Deal Terms and click Save', async () => {
@@ -631,12 +536,12 @@ test.describe('Deal Listing Form (List in Marketplace) — Save validation and r
         const open = await listing.isDealFormOpen();
         const required = await listing.isOpportunityDetailsRequired();
         const invalid = await listing.isOpportunityDetailsInvalid();
-        console.log(`Form still open=${open}, Opportunity Details required=${required}, invalid=${invalid}`);
+        Logger.log(`Form still open=${open}, Opportunity Details required=${required}, invalid=${invalid}`);
         expect(open, 'Save must be blocked while Opportunity Details is empty').toBe(true);
         expect(required).toBe(true);
         // Seen QA 2026-10-11: Save is refused with a toast; the empty field itself is not marked invalid.
         await expect(
-          authedSellerLeadPage.messageText('Please fill in all required fields.'),
+          authedSellerLeadPage.getMessageText('Please fill in all required fields.'),
           'Save refused with a validation error',
         ).toBeVisible({ timeout: 10000 });
       });
@@ -644,8 +549,6 @@ test.describe('Deal Listing Form (List in Marketplace) — Save validation and r
       await test.step('Cancel and close the form', async () => {
         await listing.cancelAndClose();
       });
-
-      await settleAfter(authedPage, data);
     },
   );
 
@@ -653,12 +556,12 @@ test.describe('Deal Listing Form (List in Marketplace) — Save validation and r
   test(
     'Save is blocked when both required fields are empty @regression',
     { tag: '@FORM-17' },
-    async ({ authedPage, data, authedHomePage, authedSellerLeadPage }) => {
+    async ({ authedHomePage, authedSellerLeadPage }) => {
       const listing = authedSellerLeadPage.marketplaceListing;
 
       await test.step('Open the New Deal form (Assignment) on an unlisted seller op', async () => {
-        await resetToHome(authedPage, authedHomePage, data);
-        await openDealForm(authedSellerLeadPage, authedHomePage);
+        await authedHomePage.openAndSettle();
+        await authedSellerLeadPage.openUnlistedDealForm(authedHomePage, FORM_FIXTURE);
       });
 
       await test.step('Click Save with both required fields empty', async () => {
@@ -669,13 +572,13 @@ test.describe('Deal Listing Form (List in Marketplace) — Save validation and r
         const open = await listing.isDealFormOpen();
         const dealTermsInvalid = await listing.isDealTermsInvalid();
         const oppDetailsInvalid = await listing.isOpportunityDetailsInvalid();
-        console.log(
+        Logger.log(
           `Form still open=${open}, Deal Terms invalid=${dealTermsInvalid}, Opportunity Details invalid=${oppDetailsInvalid}`,
         );
         expect(open, 'Save must be blocked while both required fields are empty').toBe(true);
         // Seen QA 2026-10-11: Save is refused with a toast; the empty field itself is not marked invalid.
         await expect(
-          authedSellerLeadPage.messageText('Please fill in all required fields.'),
+          authedSellerLeadPage.getMessageText('Please fill in all required fields.'),
           'Save refused with a validation error',
         ).toBeVisible({ timeout: 10000 });
       });
@@ -683,8 +586,6 @@ test.describe('Deal Listing Form (List in Marketplace) — Save validation and r
       await test.step('Cancel and close the form', async () => {
         await listing.cancelAndClose();
       });
-
-      await settleAfter(authedPage, data);
     },
   );
 
@@ -697,8 +598,6 @@ test.describe('Deal Listing Form (List in Marketplace) — Save validation and r
     'Deal saves as Assignment with Estimated ARV and Direct Invite left blank @regression',
     { tag: '@FORM-18' },
     async ({
-      authedPage,
-      data,
       authedHomePage,
       authedSellerLeadPage,
       authedMarketplacePage,
@@ -707,7 +606,7 @@ test.describe('Deal Listing Form (List in Marketplace) — Save validation and r
       test.setTimeout(300_000);
 
       const badge = await test.step('List a fresh seller op as Assignment with only the required fields', async () => {
-        await resetToHome(authedPage, authedHomePage, data);
+        await authedHomePage.openAndSettle();
         return listWithRequiredFieldsOnly(
           'Assignment',
           authedHomePage,
@@ -720,8 +619,6 @@ test.describe('Deal Listing Form (List in Marketplace) — Save validation and r
       await test.step('Verify the deal carries the Assignment badge', async () => {
         expect(badge, 'Deal Type Assignment').toBe('Assignment');
       });
-
-      await settleAfter(authedPage, data);
     },
   );
 
@@ -730,8 +627,6 @@ test.describe('Deal Listing Form (List in Marketplace) — Save validation and r
     'Deal saves as Opportunity with Deal Type = Opportunity @regression',
     { tag: '@FORM-19' },
     async ({
-      authedPage,
-      data,
       authedHomePage,
       authedSellerLeadPage,
       authedMarketplacePage,
@@ -740,7 +635,7 @@ test.describe('Deal Listing Form (List in Marketplace) — Save validation and r
       test.setTimeout(300_000);
 
       const badge = await test.step('List a fresh seller op as Opportunity with only the required fields', async () => {
-        await resetToHome(authedPage, authedHomePage, data);
+        await authedHomePage.openAndSettle();
         return listWithRequiredFieldsOnly(
           'Opportunity',
           authedHomePage,
@@ -754,8 +649,6 @@ test.describe('Deal Listing Form (List in Marketplace) — Save validation and r
         // Opportunity deals carry no type badge on QA (see LF_022); never the Assignment one.
         expect(badge, 'not saved as Assignment').not.toBe('Assignment');
       });
-
-      await settleAfter(authedPage, data);
     },
   );
 
@@ -763,12 +656,12 @@ test.describe('Deal Listing Form (List in Marketplace) — Save validation and r
   test(
     'Opportunity with a complete address lists successfully without a Direct Invite @regression',
     { tag: '@FORM-20' },
-    async ({ authedPage, data, authedHomePage, authedSellerLeadPage, authedMarketplaceDealPage }) => {
+    async ({ authedHomePage, authedSellerLeadPage, authedMarketplaceDealPage }) => {
       test.setTimeout(300_000);
       const seller = authedSellerLeadPage;
 
       await test.step('Create a fresh seller op with a complete property address', async () => {
-        await resetToHome(authedPage, authedHomePage, data);
+        await authedHomePage.openAndSettle();
         await seller.createFromHome(authedHomePage, envConfig.FRANCHISE_A_NAME);
         expect(await seller.isListInMarketplaceCtaShown()).toBe(true);
       });
@@ -788,8 +681,6 @@ test.describe('Deal Listing Form (List in Marketplace) — Save validation and r
         );
         await expect.poll(() => seller.getMarketplaceCtaText(), { timeout: 30000 }).toMatch(/^View (in )?Marketplace/);
       });
-
-      await settleAfter(authedPage, data);
     },
   );
 });
@@ -799,89 +690,88 @@ test.describe
   // Shared across the two tests below — safe under this project's
   // workers:1/fullyParallel:false + .serial() config, which guarantees they
   // run sequentially in the same worker.
-  let mpdId = '';
-  let location = '';
+    let mpdId = '';
+    let location = '';
 
-  test(
-    'Franchise A lists a fresh seller op in the Marketplace @regression',
-    { tag: '@FORM-21' },
-    async ({
+    test(
+      'Franchise A lists a fresh seller op in the Marketplace @regression',
+      { tag: '@FORM-21' },
+      async ({
+        authedHomePage,
+        authedSellerLeadPage,
+        authedMarketplacePage,
+        authedMarketplaceDealPage,
+      }) => {
+        test.setTimeout(300_000);
+
+        await test.step('List a fresh seller op as Franchise A', async () => {
+          await authedHomePage.openAndSettle();
+          const deal = await listFreshDeal(
+            authedHomePage,
+            authedSellerLeadPage,
+            authedMarketplacePage,
+            authedMarketplaceDealPage,
+            'Assignment',
+            '',
+          );
+          mpdId = deal.mpdId;
+        });
+
+        await test.step("Read the deal's MPD id and location, then close it", async () => {
+          location = await authedMarketplaceDealPage.getLocation();
+          Logger.log(`Franchise A: listed deal ${mpdId} at "${location}"`);
+          expect(mpdId).toMatch(/MPD-\d+/);
+          await authedMarketplaceDealPage.close();
+        });
+      },
+    );
+
+    // Franchises don't see each other's deals (user-confirmed, live-checked QA 2026-10-26): A's new
+    // listing reaches neither B's Available list nor B's search, nor any of B's other Deal Status views.
+    test('Franchise B cannot see the deal Franchise A listed, in any Deal Status or by search @regression', async ({
       authedPage,
+      franchiseBPage,
       data,
-      authedHomePage,
-      authedSellerLeadPage,
-      authedMarketplacePage,
-      authedMarketplaceDealPage,
+      franchiseBHomePage,
+      franchiseBMarketplacePage,
+      franchiseBMarketplaceDealPage,
     }) => {
-      test.setTimeout(300_000);
+      test.skip(!mpdId, "Franchise A's listing test above did not produce an MPD id to cross-check against.");
 
-      await test.step('List a fresh seller op as Franchise A', async () => {
-        await resetToHome(authedPage, authedHomePage, data);
-        const deal = await listWithDirectInvite(
-          authedHomePage,
-          authedSellerLeadPage,
-          authedMarketplacePage,
-          authedMarketplaceDealPage,
-          'Assignment',
-          '',
-        );
-        expect(deal, 'fresh seller op offers "List in Marketplace"').not.toBeNull();
-        mpdId = deal!.mpdId;
+      await test.step('Tile both windows and open Home as Franchise B', async () => {
+        await tileWindow(authedPage, 'left');
+        await tileWindow(franchiseBPage, 'right');
+        await franchiseBHomePage.openAndSettle();
       });
 
-      await test.step("Read the deal's MPD id and location, then close it", async () => {
-        location = (await authedMarketplaceDealPage.getLocationText()).replace(/^Location:\s*/, '').trim();
-        console.log(`Franchise A: listed deal ${mpdId} at "${location}"`);
-        expect(mpdId).toMatch(/MPD-\d+/);
-        await authedMarketplaceDealPage.close();
+      await test.step("Verify the deal is under none of Franchise B's Deal Status views", async () => {
+        for (const status of ['Available', 'My Direct Invites', 'My Bids', 'Archived'] as const) {
+          expect(
+            await openDealAs(franchiseBMarketplacePage, franchiseBMarketplaceDealPage, mpdId, status),
+            `${mpdId} not under ${status} for Franchise B`,
+          ).toBe(false);
+        }
       });
-    },
-  );
 
-  // Franchises don't see each other's deals (user-confirmed, live-checked QA 2026-10-26): A's new
-  // listing reaches neither B's Available list nor B's search, nor any of B's other Deal Status views.
-  test('Franchise B cannot see the deal Franchise A listed, in any Deal Status or by search @regression', async ({
-    authedPage,
-    franchiseBPage,
-    data,
-    franchiseBHomePage,
-    franchiseBMarketplacePage,
-    franchiseBMarketplaceDealPage,
-  }) => {
-    test.skip(!mpdId, "Franchise A's listing test above did not produce an MPD id to cross-check against.");
-
-    await test.step('Tile both windows and open Home as Franchise B', async () => {
-      await tileWindow(authedPage, 'left');
-      await tileWindow(franchiseBPage, 'right');
-      await resetToHome(franchiseBPage, franchiseBHomePage, data);
-    });
-
-    await test.step("Verify the deal is under none of Franchise B's Deal Status views", async () => {
-      for (const status of ['Available', 'My Direct Invites', 'My Bids', 'Archived'] as const) {
+      await test.step('Verify searching the MPD id finds nothing for Franchise B', async () => {
+        await franchiseBMarketplacePage.navigate();
+        await franchiseBMarketplacePage.resetFilters();
+        await franchiseBMarketplacePage.expectMarketplaceLoaded();
+        await franchiseBMarketplacePage.searchMarketplace(mpdId);
+        await franchiseBMarketplacePage.expectMarketplaceLoaded();
         expect(
-          await openDealAs(franchiseBMarketplacePage, franchiseBMarketplaceDealPage, mpdId, status),
-          `${mpdId} not under ${status} for Franchise B`,
-        ).toBe(false);
-      }
-    });
+          await franchiseBMarketplacePage.getAllCardMpdIds(),
+          `searching ${mpdId} finds nothing for Franchise B`,
+        ).not.toContain(mpdId);
+        expect(location, 'A read a real location').toMatch(/^[^,]+, [A-Z]{2} \d{5}/);
+        await franchiseBMarketplacePage.clearSearch();
+      });
 
-    await test.step('Verify searching the MPD id finds nothing for Franchise B', async () => {
-      await franchiseBMarketplacePage.navigate();
-      await franchiseBMarketplacePage.resetFilters();
-      await franchiseBMarketplacePage.expectMarketplaceLoaded();
-      await franchiseBMarketplacePage.searchMarketplace(mpdId);
-      await franchiseBMarketplacePage.expectMarketplaceLoaded();
-      expect(
-        await franchiseBMarketplacePage.getAllCardMpdIds(),
-        `searching ${mpdId} finds nothing for Franchise B`,
-      ).not.toContain(mpdId);
-      expect(location, 'A read a real location').toMatch(/^[^,]+, [A-Z]{2} \d{5}/);
-      await franchiseBMarketplacePage.clearSearch();
+      await test.step("Let Franchise B's in-flight save finish before the next test", async () => {
+        await franchiseBMarketplacePage.waitForSpinner(data.timeouts.afterEach);
+      });
     });
-
-    await franchiseBPage.waitForTimeout(data.timeouts.afterEach);
   });
-});
 
 // =====================================================================
 // New Deal form on a brand-new seller op (created from Home each run, so it
@@ -907,7 +797,7 @@ test.describe('Deal Listing Form (List in Marketplace) — fresh seller op @regr
     async ({ authedHomePage, authedSellerLeadPage, authedMarketplacePage, authedMarketplaceDealPage }) => {
       const seller = authedSellerLeadPage;
       const form = seller.marketplaceListing;
-      const dealTerms = `Listing form ${Date.now()}`;
+      const dealTerms = uniqueDealTerms('Listing form');
 
       await test.step('Create a new seller op on Home; it offers "List in Marketplace"', async () => {
         await seller.createFromHome(authedHomePage, FRANCHISE_A);
@@ -954,18 +844,18 @@ test.describe('Deal Listing Form (List in Marketplace) — fresh seller op @regr
       // Covers: LF_026
       await test.step('A Direct Invite search with no match offers no franchise and shows no error', async () => {
         await form.searchDirectInvite('zzzzqq');
-        expect((await form.getDirectInviteOptionLabels()).filter((l) => /LLC|Inc|Franchise/i.test(l))).toEqual([]);
+        expect(await form.getDirectInviteFranchiseOptionLabels()).toEqual([]);
         expect(await form.hasDirectInviteSelection()).toBe(false);
         await form.clearDirectInviteSearch();
       });
 
       // Covers: SAN_024
       await test.step('Direct Invite offers other franchises but never the Listing Franchise', async () => {
-        await form.searchDirectInvite(FRANCHISE_A.split(/[\s,]+/)[0]);
+        await form.searchDirectInvite(franchiseSearchTerm(FRANCHISE_A));
         expect(await form.getDirectInviteOptionLabels(), 'Listing Franchise not offered').not.toContain(FRANCHISE_A);
         await form.clearDirectInviteSearch();
-        await form.searchDirectInvite(FRANCHISE_B.split(/[\s,]+/)[0]);
-        expect((await form.getDirectInviteOptionLabels()).join(' | ')).toContain(FRANCHISE_B);
+        await form.searchDirectInvite(franchiseSearchTerm(FRANCHISE_B));
+        expect(await form.offersDirectInviteFranchise(FRANCHISE_B), 'another franchise is offered').toBe(true);
         await form.clearDirectInviteSearch();
       });
 
@@ -983,15 +873,14 @@ test.describe('Deal Listing Form (List in Marketplace) — fresh seller op @regr
         await form.typeEstimatedArv('123456'); // the Direct Invite picked above is still selected
         await form.clickBack();
         await form.selectDealType('Opportunity');
-        const kept = {
-          terms: (await form.getDealTermsValue()) === 'Back/Next check terms',
-          details: (await form.getOpportunityDetailsValue()) === 'Back/Next check details',
-          arv: (await form.getEstimatedArvValue()).replace(/\D/g, '') === '123456',
-          invite: (await form.getDirectInviteValue()).includes(FRANCHISE_B),
-        };
-        console.log(`  [Form] after Back/Next: ${JSON.stringify(kept)}`);
-        const values = Object.values(kept);
-        expect(values.every(Boolean) || !values.some(Boolean), 'all values kept or all cleared').toBe(true);
+        const kept = await form.getRetainedValues({
+          terms: 'Back/Next check terms',
+          details: 'Back/Next check details',
+          arvDigits: '123456',
+          invite: FRANCHISE_B,
+        });
+        Logger.log(`  [Form] after Back/Next: ${JSON.stringify(kept)}`);
+        expect(allOrNone(kept), 'all values kept or all cleared').toBe(true);
         await form.clearEstimatedArv();
       });
 
@@ -1002,13 +891,11 @@ test.describe('Deal Listing Form (List in Marketplace) — fresh seller op @regr
         await form.clearDirectInviteSelection();
         expect(await form.hasDirectInviteSelection()).toBe(false);
         expect(await form.getDirectInviteValue()).not.toContain(FRANCHISE_B);
-        // QA 2026-10-21: after clearing, retyping the exact same search text (a short franchise-name fragment) lists nothing until the text
+        // QA 2026-10-21: after clearing, retyping the exact same search text (a short franchise-name fragment) lists
+        // nothing until the text
         // changes; any other text works. So search by the fuller name, as a user refining the search would.
-        await form.searchDirectInvite(FRANCHISE_B.replace(/,.*$/, ''));
-        expect(
-          (await form.getDirectInviteOptionLabels()).join(' | '),
-          'franchises offered again after clearing',
-        ).toContain(FRANCHISE_B);
+        await form.searchDirectInvite(franchiseBaseName(FRANCHISE_B));
+        expect(await form.offersDirectInviteFranchise(FRANCHISE_B), 'franchises offered again after clearing').toBe(true);
         await form.clearDirectInviteSearch();
       });
 
@@ -1043,7 +930,8 @@ test.describe('Deal Listing Form (List in Marketplace) — fresh seller op @regr
       // Covers: LF_027/LF_019/LF_021/LF_024
       await test.step('Exactly one deal was created — Opportunity type, ARV "$250,000", no Direct Invite, no CORP badge', async () => {
         await authedMarketplacePage.navigate();
-        await authedMarketplacePage.resetFilters(); // filters persist within a session; My Listed Deals sorts newest first
+        // Filters persist within a session; My Listed Deals sorts newest first.
+        await authedMarketplacePage.resetFilters();
         expect(await openDealAs(authedMarketplacePage, authedMarketplaceDealPage, null, 'My Listed Deals')).toBe(true);
         const text = await authedMarketplaceDealPage.getDealDialogText();
         expect(text).toContain(dealTerms);
@@ -1062,12 +950,13 @@ test.describe('Deal Listing Form (List in Marketplace) — fresh seller op @regr
         const deal = authedMarketplaceDealPage;
         expect(await deal.getDealDialogText(), 'Saved as Opportunity, not Assignment').not.toMatch(/\bAssignment\b/);
         expect(await deal.getDealDialogText(), 'ARV shown currency-formatted').toContain('Estimated ARV: $250,000');
-        expect((await deal.getAdditionalFields())['Deal Stage'], 'No Direct Invite').not.toBe('Direct');
+        expect(await deal.getDealStage(), 'No Direct Invite').not.toBe('Direct');
         expect(await deal.getDealDialogText()).toContain('No Bids were placed yet');
         expect(await deal.hasCorpBadge()).toBe(false);
-        // Covers: LF_022 — Opportunity deals show no type badge on QA (2026-10-06/11); product to confirm the expected badge.
+        // Covers: LF_022 — Opportunity deals show no type badge on QA (2026-10-06/11); product to confirm the expected
+        // badge.
         const badge = await deal.getDealTypeBadge();
-        console.log(`  [Form] Opportunity deal type badge: "${badge}"`);
+        Logger.log(`  [Form] Opportunity deal type badge: "${badge}"`);
         expect(badge, 'Opportunity deal is not badged Assignment').not.toBe('Assignment');
         await deal.close();
       });
@@ -1091,7 +980,7 @@ test.describe('Deal Listing Form (List in Marketplace) — fresh seller op @regr
       });
 
       await test.step('Verify Estimated ARV is pre-filled and disabled', async () => {
-        expect((await seller.marketplaceListing.getEstimatedArvValue()).replace(/[^\d]/g, '')).toBe('310000');
+        expect(await seller.marketplaceListing.getEstimatedArvDigits()).toBe('310000');
         expect(await seller.marketplaceListing.isEstimatedArvDisabled()).toBe(true);
       });
 
@@ -1106,7 +995,7 @@ test.describe('Deal Listing Form (List in Marketplace) — fresh seller op @regr
   test(
     'A corp deal (Lead Type "Corporate") carries the CORP badge in the Marketplace @regression',
     { tag: '@FORM-25' },
-    async ({ authedPage, authedMarketplacePage, authedMarketplaceDealPage }) => {
+    async ({ authedSellerLeadPage, authedMarketplacePage, authedMarketplaceDealPage }) => {
       // Read-only: the corp deal listed manually on QA 2026-10-06 (MPD-05032). Automation never lists corp deals.
       const corpMpd = 'MPD-05032';
 
@@ -1126,9 +1015,8 @@ test.describe('Deal Listing Form (List in Marketplace) — fresh seller op @regr
       test.skip(!href, `${corpMpd} no longer links to its Opportunity (won/transferred)`);
 
       await test.step("Verify the Opportunity's Lead Type is Corporate", async () => {
-        const opp = new SellerLeadPageClass(authedPage);
-        await authedPage.goto(href);
-        expect(await opp.getDetailField('Lead Type')).toBe('Corporate');
+        await authedSellerLeadPage.openFromHref(href);
+        expect(await authedSellerLeadPage.getDetailField('Lead Type')).toBe('Corporate');
       });
     },
   );

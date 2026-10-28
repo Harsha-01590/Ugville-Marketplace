@@ -1,9 +1,8 @@
-import { test, expect } from '../../fixtures/testFixtures';
-import type { Page } from '@playwright/test';
-import type { HomePage } from '../../modules/dashboard';
-import type { TestData } from '../../fixtures/testFixtures';
-import { envConfig } from '../../config/env.config';
-import { listWithDirectInvite } from '../../utils/directInvite';
+import { test, expect } from '@fixtures/testFixtures';
+import { envConfig } from '@config/env.config';
+import { listFreshDeal } from '@utils/directInvite';
+import { openFirstDealWhere } from '@utils/dealScan';
+import { Logger } from '@utils/logger';
 
 /**
  * Workflow suite for the Marketplace_Master sheet's workflow:
@@ -48,15 +47,7 @@ import { listWithDirectInvite } from '../../utils/directInvite';
  *   not attempted.
  */
 
-async function resetToHome(authedPage: Page, authedHomePage: HomePage, data: TestData) {
-  await authedHomePage.navigate();
-  await authedPage.waitForLoadState('domcontentloaded');
-  await authedPage.waitForTimeout(data.timeouts.settle);
-}
-
-async function settleAfter(authedPage: Page, data: TestData) {
-  await authedPage.waitForTimeout(data.timeouts.afterEach);
-}
+const BID_REASON = 'Best opportunity in the area';
 
 test.describe('Messaging: Toasts, Errors & Contextual Copy @regression @MarketplaceMessagingToastsErrorsContextualCopy', () => {
   // =====================================================================
@@ -68,8 +59,6 @@ test.describe('Messaging: Toasts, Errors & Contextual Copy @regression @Marketpl
     'CTA no longer reads "List in Marketplace" once the seller op is listed @regression',
     { tag: '@MSG-01' },
     async ({
-      authedPage,
-      data,
       authedHomePage,
       authedSellerLeadPage,
       authedMarketplacePage,
@@ -78,8 +67,8 @@ test.describe('Messaging: Toasts, Errors & Contextual Copy @regression @Marketpl
       test.setTimeout(300_000);
 
       const deal = await test.step('List a fresh seller op in the Marketplace', async () => {
-        await resetToHome(authedPage, authedHomePage, data);
-        const listed = await listWithDirectInvite(
+        await authedHomePage.openAndSettle();
+        const listed = await listFreshDeal(
           authedHomePage,
           authedSellerLeadPage,
           authedMarketplacePage,
@@ -87,19 +76,16 @@ test.describe('Messaging: Toasts, Errors & Contextual Copy @regression @Marketpl
           'Assignment',
           '',
         );
-        expect(listed, 'fresh seller op offers "List in Marketplace"').not.toBeNull();
         await authedMarketplaceDealPage.close();
-        return listed!;
+        return listed;
       });
 
       await test.step('Reopen the seller op and verify the CTA now reads "View in Marketplace"', async () => {
         await authedSellerLeadPage.navigateById(deal.oppId);
         const ctaText = await authedSellerLeadPage.getMarketplaceCtaText();
-        console.log(`CTA text after listing ${deal.mpdId} = "${ctaText}"`);
+        Logger.log(`CTA text after listing ${deal.mpdId} = "${ctaText}"`);
         expect(ctaText).toMatch(/^View (in )?Marketplace/);
       });
-
-      await settleAfter(authedPage, data);
     },
   );
 
@@ -111,9 +97,9 @@ test.describe('Messaging: Toasts, Errors & Contextual Copy @regression @Marketpl
   test(
     'The already-bid message references the current bid status @regression',
     { tag: '@MSG-02' },
-    async ({ authedPage, data, authedHomePage, authedMarketplacePage, authedMarketplaceDealPage }) => {
+    async ({ authedHomePage, authedMarketplacePage, authedMarketplaceDealPage }) => {
       const count = await test.step('Open the Marketplace filtered to My Bids', async () => {
-        await resetToHome(authedPage, authedHomePage, data);
+        await authedHomePage.openAndSettle();
         await authedMarketplacePage.navigate();
         await authedMarketplacePage.expectMarketplaceLoaded();
         await authedMarketplacePage.selectDealStatus('My Bids');
@@ -133,15 +119,13 @@ test.describe('Messaging: Toasts, Errors & Contextual Copy @regression @Marketpl
         const hasMessage = await authedMarketplaceDealPage.hasAlreadyBidMessage();
         if (hasMessage) {
           const text = await authedMarketplaceDealPage.getAlreadyBidMessageText();
-          console.log(`"${text}"`);
+          Logger.log(`"${text}"`);
           expect(text, 'Should reference the current bid status').toMatch(/current bid status/i);
         } else {
-          console.log('First "My Bids" deal did not show the already-bid message — inconclusive');
+          Logger.log('First "My Bids" deal did not show the already-bid message — inconclusive');
         }
         await authedMarketplaceDealPage.close();
       });
-
-      await settleAfter(authedPage, data);
     },
   );
 
@@ -153,9 +137,9 @@ test.describe('Messaging: Toasts, Errors & Contextual Copy @regression @Marketpl
   test(
     'A listed deal with zero bids shows the "No Bids" empty state @regression',
     { tag: '@MSG-03' },
-    async ({ authedPage, data, authedHomePage, authedMarketplacePage, authedMarketplaceDealPage }) => {
+    async ({ authedHomePage, authedMarketplacePage, authedMarketplaceDealPage }) => {
       const count = await test.step('Open the Marketplace filtered to My Listed Deals', async () => {
-        await resetToHome(authedPage, authedHomePage, data);
+        await authedHomePage.openAndSettle();
         await authedMarketplacePage.navigate();
         await authedMarketplacePage.expectMarketplaceLoaded();
         await authedMarketplacePage.selectDealStatus('My Listed Deals');
@@ -166,26 +150,17 @@ test.describe('Messaging: Toasts, Errors & Contextual Copy @regression @Marketpl
 
       test.skip(count === 0, 'No deal listed by this franchise in current sandbox state');
 
-      await test.step('Find a zero-bid listed deal and check its "No Bids" message', async () => {
-        for (let i = 0; i < count; i++) {
-          await authedMarketplacePage.openDealByIndex(i);
-          await authedMarketplaceDealPage.expectLoaded();
-          const bidCount = await authedMarketplaceDealPage.getBidHistoryCount();
-          if (bidCount === 0) {
-            const present = await authedMarketplaceDealPage
-              .messageText(/no bids were placed/i)
-              .isVisible()
-              .catch(() => false);
-            console.log(`Deal index ${i} has 0 bids — "No Bids" message present = ${present}`);
-            await authedMarketplaceDealPage.close();
-            break;
-          }
-          await authedMarketplaceDealPage.close();
-          if (i === count - 1) console.log('No zero-bid listed deal found — inconclusive');
-        }
+      const found = await test.step('Find a listed deal with zero bids', async () => {
+        return openFirstDealWhere(authedMarketplacePage, authedMarketplaceDealPage, count, (deal) => deal.hasNoBids());
       });
 
-      await settleAfter(authedPage, data);
+      test.skip(!found, 'No zero-bid listed deal found');
+
+      await test.step('Check the zero-bid deal\'s "No Bids" message, then close it', async () => {
+        const present = await authedMarketplaceDealPage.isMessageShown(/no bids were placed/i);
+        Logger.log(`Zero-bid deal ${await authedMarketplaceDealPage.getMpdId()} — "No Bids" message present = ${present}`);
+        await authedMarketplaceDealPage.close();
+      });
     },
   );
 
@@ -197,9 +172,9 @@ test.describe('Messaging: Toasts, Errors & Contextual Copy @regression @Marketpl
   test(
     'A Direct Invite deal shows a pending-action message to the Listing Franchise @regression',
     { tag: '@MSG-04' },
-    async ({ authedPage, data, authedHomePage, authedMarketplacePage, authedMarketplaceDealPage }) => {
+    async ({ authedHomePage, authedMarketplacePage, authedMarketplaceDealPage }) => {
       const count = await test.step('Open the Marketplace filtered to My Listed Deals / Direct', async () => {
-        await resetToHome(authedPage, authedHomePage, data);
+        await authedHomePage.openAndSettle();
         await authedMarketplacePage.navigate();
         await authedMarketplacePage.expectMarketplaceLoaded();
         await authedMarketplacePage.selectDealStatus('My Listed Deals');
@@ -207,7 +182,7 @@ test.describe('Messaging: Toasts, Errors & Contextual Copy @regression @Marketpl
         await authedMarketplacePage.applyFilters();
         await authedMarketplacePage.expectMarketplaceLoaded();
         const direct = await authedMarketplacePage.getDealCardCount();
-        console.log(`${direct} Direct-stage listed deal(s)`);
+        Logger.log(`${direct} Direct-stage listed deal(s)`);
         return direct;
       });
 
@@ -219,15 +194,10 @@ test.describe('Messaging: Toasts, Errors & Contextual Copy @regression @Marketpl
       });
 
       await test.step('Check for the "Pending Action from" message, then close the deal', async () => {
-        const present = await authedMarketplaceDealPage
-          .messageText(/pending action from/i)
-          .isVisible()
-          .catch(() => false);
-        console.log(`"Pending Action from" message present = ${present}`);
+        const present = await authedMarketplaceDealPage.isMessageShown(/pending action from/i);
+        Logger.log(`"Pending Action from" message present = ${present}`);
         await authedMarketplaceDealPage.close();
       });
-
-      await settleAfter(authedPage, data);
     },
   );
 
@@ -248,9 +218,9 @@ test.describe('Messaging: Toasts, Errors & Contextual Copy @regression @Marketpl
   test(
     'Place Bid confirmation popup echoes the entered Reason for Bid @regression',
     { tag: '@MSG-05' },
-    async ({ authedPage, data, authedHomePage, authedMarketplacePage, authedMarketplaceDealPage }) => {
+    async ({ authedHomePage, authedMarketplacePage, authedMarketplaceDealPage }) => {
       const count = await test.step('Open the Marketplace', async () => {
-        await resetToHome(authedPage, authedHomePage, data);
+        await authedHomePage.openAndSettle();
         await authedMarketplacePage.navigate();
         await authedMarketplacePage.expectMarketplaceLoaded();
         return authedMarketplacePage.getDealCardCount();
@@ -266,22 +236,20 @@ test.describe('Messaging: Toasts, Errors & Contextual Copy @regression @Marketpl
 
       test.skip(!eligible, 'First deal is not eligible to bid on — cannot exercise the Place Bid confirmation');
 
-      const reason = 'Best opportunity in the area';
-
       await test.step('Enter a Reason for Bid and click Place Bid', async () => {
         await authedMarketplaceDealPage.selectFranchiseIfPresent();
-        await authedMarketplaceDealPage.enterBidReason(reason);
+        await authedMarketplaceDealPage.enterBidReason(BID_REASON);
         await authedMarketplaceDealPage.clickPlaceBid();
       });
 
       await test.step('Verify the confirmation popup echoes the reason', async () => {
         const popupText = await authedMarketplaceDealPage.getPlaceBidConfirmationText();
-        console.log(`Confirmation popup text = "${popupText}"`);
+        Logger.log(`Confirmation popup text = "${popupText}"`);
         if (popupText) {
           expect(popupText).toMatch(/reason for bid/i);
-          expect(popupText).toContain(reason);
+          expect(popupText).toContain(BID_REASON);
         } else {
-          console.log('No confirmation popup text found — inconclusive');
+          Logger.log('No confirmation popup text found — inconclusive');
         }
       });
 
@@ -289,8 +257,6 @@ test.describe('Messaging: Toasts, Errors & Contextual Copy @regression @Marketpl
         // Not finalizing — same non-duplication reasoning as chunk 6's BW_003-005.
         await authedMarketplaceDealPage.close();
       });
-
-      await settleAfter(authedPage, data);
     },
   );
 
@@ -299,15 +265,13 @@ test.describe('Messaging: Toasts, Errors & Contextual Copy @regression @Marketpl
     'An eligible franchise can open a deal and start listing a Seller Opportunity @regression',
     { tag: '@MSG-06' },
     async ({
-      authedPage,
-      data,
       authedHomePage,
       authedMarketplacePage,
       authedMarketplaceDealPage,
       authedSellerLeadPage,
     }) => {
       await test.step('Open the Marketplace with filters reset', async () => {
-        await resetToHome(authedPage, authedHomePage, data);
+        await authedHomePage.openAndSettle();
         await authedMarketplacePage.navigate();
         await authedMarketplacePage.resetFilters();
         await authedMarketplacePage.expectMarketplaceLoaded();
@@ -331,8 +295,6 @@ test.describe('Messaging: Toasts, Errors & Contextual Copy @regression @Marketpl
         await authedSellerLeadPage.marketplaceListing.expectDealTypeStepContent();
         await authedSellerLeadPage.marketplaceListing.cancelDealTypeStep();
       });
-
-      await settleAfter(authedPage, data);
     },
   );
 
@@ -340,9 +302,9 @@ test.describe('Messaging: Toasts, Errors & Contextual Copy @regression @Marketpl
   test(
     'View Deal opens the deal detail with no validation error for an eligible franchise @regression',
     { tag: '@MSG-07' },
-    async ({ authedPage, data, authedHomePage, authedMarketplacePage, authedMarketplaceDealPage }) => {
+    async ({ authedHomePage, authedMarketplacePage, authedMarketplaceDealPage }) => {
       const count = await test.step('Open the Marketplace with filters reset', async () => {
-        await resetToHome(authedPage, authedHomePage, data);
+        await authedHomePage.openAndSettle();
         await authedMarketplacePage.navigate();
         await authedMarketplacePage.resetFilters();
         await authedMarketplacePage.expectMarketplaceLoaded();
@@ -358,12 +320,10 @@ test.describe('Messaging: Toasts, Errors & Contextual Copy @regression @Marketpl
 
       await test.step('Verify no error toast is shown, then close the deal', async () => {
         const toast = await authedMarketplaceDealPage.waitForToastText(3000).catch(() => '');
-        console.log(`Deal ${await authedMarketplaceDealPage.getMpdId()} opened; toast = "${toast}"`);
+        Logger.log(`Deal ${await authedMarketplaceDealPage.getMpdId()} opened; toast = "${toast}"`);
         expect(toast, 'no error toast on View Deal').not.toMatch(/error|not eligible|failed/i);
         await authedMarketplaceDealPage.close();
       });
-
-      await settleAfter(authedPage, data);
     },
   );
 
@@ -371,9 +331,9 @@ test.describe('Messaging: Toasts, Errors & Contextual Copy @regression @Marketpl
   test(
     'Filters that match no deals show the "no deals" message and the page stays usable @regression',
     { tag: '@MSG-08' },
-    async ({ authedPage, data, authedHomePage, authedMarketplacePage }) => {
+    async ({ authedHomePage, authedMarketplacePage }) => {
       await test.step('Open the Marketplace with filters reset', async () => {
-        await resetToHome(authedPage, authedHomePage, data);
+        await authedHomePage.openAndSettle();
         await authedMarketplacePage.navigate();
         await authedMarketplacePage.resetFilters();
         await authedMarketplacePage.expectMarketplaceLoaded();
@@ -390,8 +350,8 @@ test.describe('Messaging: Toasts, Errors & Contextual Copy @regression @Marketpl
         expect(await authedMarketplacePage.getDealCardCount()).toBe(0);
         await authedMarketplacePage.expectEmptyState();
         // Wording differs from the spec ("No Deals available in Marketplace"); the app says "No deals found."
-        console.log(
-          `Empty-state text: "${await authedMarketplacePage.messageText(/No (Marketplace )?deals?/i).innerText()}"`,
+        Logger.log(
+          `Empty-state text: "${await authedMarketplacePage.readMessage(/No (Marketplace )?deals?/i)}"`,
         );
       });
 
@@ -402,8 +362,6 @@ test.describe('Messaging: Toasts, Errors & Contextual Copy @regression @Marketpl
           0,
         );
       });
-
-      await settleAfter(authedPage, data);
     },
   );
 });

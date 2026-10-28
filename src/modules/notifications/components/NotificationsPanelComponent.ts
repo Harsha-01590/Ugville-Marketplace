@@ -1,5 +1,5 @@
 import { type Page, type Locator, expect } from '@playwright/test';
-import { BasePage } from '../../../shared/pages/base/BasePage';
+import { BasePage } from '@shared/pages/base/BasePage';
 
 /**
  * Notifications panel — accessible via the bell icon in the top navigation.
@@ -24,43 +24,52 @@ import { BasePage } from '../../../shared/pages/base/BasePage';
  * timestamp, plus a "Mark all as read" text control above the list.
  */
 export class NotificationsPanelComponent extends BasePage {
-  // ==================== Locators ====================
-
-  /** The bell icon's accessible-name label; clicking it opens the panel (bubbles to the real click handler on its ancestor). */
+  /**
+   * The bell icon's accessible-name label; clicking it opens the panel (bubbles to the real click handler on its
+   * ancestor).
+   */
   private readonly notificationBellArea: Locator;
-  /** The unread-count badge — a distinct `.notification-count` div, not part of the bell's own text (see class docstring). */
+  /**
+   * The unread-count badge — a distinct `.notification-count` div, not part of the bell's own text (see class
+   * docstring).
+   */
   private readonly notificationBadge: Locator;
   private readonly markAllAsReadButton: Locator;
-  /** Each real notification entry — a `listitem` whose text includes a relative ("X ago") or absolute (AM/PM) timestamp, matching every notification observed live this session. */
+  /**
+   * Each real notification entry — a `listitem` whose text includes a relative ("X ago") or absolute (AM/PM) timestamp,
+   * matching every notification observed live this session.
+   */
   private readonly notificationItems: Locator;
+
+  /** The "jump to record" icon at the end of a notification row — the row's only navigation trigger. */
+  readonly getJumpIcon: (row: Locator) => Locator;
 
   constructor(page: Page) {
     super(page);
+    // No data-testid exists in this UI (Salesforce LWR site; confirmed via live inspection of QA on 2026-10-27,
+    // shadow DOM included), so every locator below falls back to role/text/CSS.
     this.notificationBellArea = page.getByText('Notifications', { exact: true }).first();
     this.notificationBadge = page.locator('.notification-container .notification-count, .notification-count').first();
     this.markAllAsReadButton = page.getByText('Mark all as read', { exact: true });
     this.notificationItems = page.getByRole('listitem').filter({ hasText: /ago|AM|PM/ });
+    this.getJumpIcon = (row) => row.locator('[icon-name="utility:jump_to_right"]');
   }
 
-  /** The "jump to record" icon at the end of a notification row — the row's only navigation trigger. */
-  private jumpIcon(row: Locator): Locator {
-    return row.locator('[icon-name="utility:jump_to_right"]');
-  }
-
-  // ==================== Actions ====================
-
-  async openNotifications() {
+  async openNotifications(): Promise<void> {
     await this.notificationBellArea.click({ force: true });
     await this.page.waitForTimeout(1000);
   }
 
-  async markAllAsRead() {
+  async markAllAsRead(): Promise<void> {
     await this.markAllAsReadButton.waitFor({ state: 'visible', timeout: 10000 });
     await this.markAllAsReadButton.click({ force: true });
     await this.page.waitForTimeout(1000);
   }
 
-  /** Count of rendered notification entries (not strictly the unread-badge count — see `expectNotificationBadgeVisible()` for that). */
+  /**
+   * Count of rendered notification entries (not strictly the unread-badge count — see
+   * `expectNotificationBadgeVisible()` for that).
+   */
   async getNotificationCount(): Promise<number> {
     return this.notificationItems.count();
   }
@@ -74,22 +83,35 @@ export class NotificationsPanelComponent extends BasePage {
     return texts;
   }
 
+  /** Every rendered notification's text, one per line. */
+  async getNotificationsText(): Promise<string> {
+    return (await this.getNotificationItems()).join('\n');
+  }
+
+  /** True when a single notification contains every one of `fragments`. */
+  async hasNotificationContainingAll(...fragments: string[]): Promise<boolean> {
+    return (await this.getNotificationItems()).some((text) => fragments.every((f) => text.includes(f)));
+  }
+
+  /** Texts of the rendered notifications whose text matches `pattern`. */
+  async getNotificationItemsMatching(pattern: RegExp): Promise<string[]> {
+    return (await this.getNotificationItems()).filter((text) => pattern.test(text));
+  }
+
   /**
    * Live-verified (2026-08-11): clicking the `<li>` row itself does nothing —
    * the only real navigation trigger is a small `utility:jump_to_right`
    * icon at the end of each row (it carries the target record's ID as
    * `data-tid`). The row's text/timestamp is not clickable.
    */
-  async clickFirstNotification() {
+  async clickFirstNotification(): Promise<void> {
     const first = this.notificationItems.first();
-    const jumpIcon = this.jumpIcon(first);
+    const jumpIcon = this.getJumpIcon(first);
     if (await jumpIcon.isVisible().catch(() => false)) {
       await jumpIcon.click();
       await this.page.waitForTimeout(2000);
     }
   }
-
-  // ==================== Assertions ====================
 
   /**
    * At least one real signal that the panel is open/rendered — the "Mark
@@ -99,7 +121,7 @@ export class NotificationsPanelComponent extends BasePage {
    * DOM regardless of its visual open/closed state), so asserting one would
    * be a guess this component's past version already got wrong once.
    */
-  async expectNotificationsPanelVisible() {
+  async expectNotificationsPanelVisible(): Promise<void> {
     const signal = this.markAllAsReadButton.or(this.notificationItems.first());
     await expect(signal.first()).toBeVisible({ timeout: 15000 });
   }
@@ -113,7 +135,7 @@ export class NotificationsPanelComponent extends BasePage {
    * Only fails if the badge div is present but its text isn't a plain digit
    * run — that would be a real rendering problem.
    */
-  async expectNotificationBadgeVisible() {
+  async expectNotificationBadgeVisible(): Promise<void> {
     await expect(this.notificationBellArea).toBeVisible();
     const badgePresent = await this.notificationBadge.isVisible().catch(() => false);
     if (!badgePresent) return; // fully read — nothing to assert on the badge itself

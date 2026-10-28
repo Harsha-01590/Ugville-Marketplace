@@ -6,7 +6,7 @@ on:
 
 jobs:
   verify:
-    name: Type-check, lint and format
+    name: Type-check and lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -23,6 +23,3 @@ jobs:
 
       - name: Lint
         run: npm run lint
-
-      - name: Format check
-        run: npm run format:check

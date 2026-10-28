@@ -1,4 +1,5 @@
 import type { Page } from '@playwright/test';
+import { Logger } from './logger';
 
 /**
  * Headed Chromium runs only: snaps this page's browser window to the left or
@@ -11,7 +12,7 @@ import type { Page } from '@playwright/test';
  * manager also applies un-maximize asynchronously and can restore the old
  * size over bounds set too early, so the move is retried until it sticks.
  */
-export async function tileWindow(page: Page, side: 'left' | 'right') {
+export async function tileWindow(page: Page, side: 'left' | 'right'): Promise<void> {
   const browser = page.context().browser();
   if (process.env.PW_HEADED !== '1' || browser?.browserType().name() !== 'chromium') return;
   try {
@@ -40,6 +41,6 @@ export async function tileWindow(page: Page, side: 'left' | 'right') {
     await cdp.detach();
   } catch (e) {
     // Cosmetic only — never fail a test over window placement.
-    console.log(`  [windowLayout] could not tile ${side} window: ${(e as Error).message}`);
+    Logger.log(`  [windowLayout] could not tile ${side} window: ${(e as Error).message}`);
   }
 }

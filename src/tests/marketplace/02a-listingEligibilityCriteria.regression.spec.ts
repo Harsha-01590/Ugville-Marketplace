@@ -1,5 +1,17 @@
-import { test, expect } from '../../fixtures/testFixtures';
-import { envConfig } from '../../config/env.config';
+import { test, expect } from '@fixtures/testFixtures';
+import { envConfig } from '@config/env.config';
+import { Logger } from '@utils/logger';
+import {
+  ELIGIBILITY_CRITERIA,
+  describeEligibilityToasts,
+  describeFailingCriteria,
+  isCriterionFailing,
+  parseFailingCriteria,
+  retiredEligibilityMessagesShown,
+  toastsShowCriterion,
+  unexpectedEligibilityToasts,
+  unknownCriteria,
+} from '@modules/seller';
 
 /**
  * Listing eligibility criteria that live in Salesforce: Good Standing,
@@ -20,41 +32,20 @@ import { envConfig } from '../../config/env.config';
  * only when MP_FAILING_CRITERIA is blank.
  */
 
-const MESSAGES = {
-  // App text, QA 2026-10-12 ("in unavailable" is the app's own typo).
-  goodStanding: 'Marketplace access in unavailable. Please contact support.',
-  advertising:
-    'Marketplace access unavailable. Your franchise(s) is not actively advertising in the primary ad council.',
-  dqi: 'Marketplace access unavailable. The DQI score of at least one franchise must be above 70 to use.',
-} as const;
-type Criterion = keyof typeof MESSAGES;
-const CRITERIA = Object.keys(MESSAGES) as Criterion[];
-
-/** Wording the app used before the eligibility messages were updated. */
-const RETIRED_MESSAGES = [
-  'Account DQI is less than eligible range',
-  'Account On Showstoppers is true',
-  'Account is not actively advertising',
-];
-
-const failing = envConfig.MP_FAILING_CRITERIA.split(',')
-  .map((c) => c.trim())
-  .filter(Boolean);
+const failing = parseFailingCriteria(envConfig.MP_FAILING_CRITERIA);
 
 test.describe('Listing Eligibility Criteria @regression @ListingEligibilityCriteria', () => {
-  // Covers: SAN_009, SAN_010, SAN_011, EM_012, EM_013, EM_014, UE_001, UE_002, UE_003, UE_004, UE_005, ME_001, ME_004, ME_005
+  // Covers: SAN_009, SAN_010, SAN_011, EM_012, EM_013, EM_014, UE_001, UE_002, UE_003, UE_004, UE_005, ME_001, ME_004,
+  // ME_005
   test(
-    `Listing follows the eligibility criteria failing in Salesforce (${failing.join(', ') || 'none'}) @regression`,
+    `Listing follows the eligibility criteria failing in Salesforce (${describeFailingCriteria(failing)}) @regression`,
     { tag: '@CRIT-01' },
     async ({ authedHomePage, authedSellerLeadPage }) => {
       test.setTimeout(300_000);
       const listing = authedSellerLeadPage.marketplaceListing;
 
       await test.step('Check MP_FAILING_CRITERIA only lists known criteria', async () => {
-        expect(
-          failing.filter((c) => !CRITERIA.includes(c as Criterion)),
-          `MP_FAILING_CRITERIA may only list: ${CRITERIA.join(', ')}`,
-        ).toEqual([]);
+        expect(unknownCriteria(failing), `MP_FAILING_CRITERIA may only list: ${ELIGIBILITY_CRITERIA}`).toEqual([]);
       });
 
       await test.step('Create a fresh seller op for Franchise A', async () => {
@@ -63,9 +54,7 @@ test.describe('Listing Eligibility Criteria @regression @ListingEligibilityCrite
 
       const toasts = await test.step('Click List in Marketplace and collect the eligibility toasts', async () => {
         const shown = await authedSellerLeadPage.attemptListingCollectingToasts();
-        console.log(
-          `Failing criteria: [${failing.join(', ')}]\nToasts shown:\n${shown.map((t) => `  ${t}`).join('\n') || '  (none)'}`,
-        );
+        Logger.log(describeEligibilityToasts(failing, shown));
         return shown;
       });
 
@@ -77,24 +66,14 @@ test.describe('Listing Eligibility Criteria @regression @ListingEligibilityCrite
         });
       } else {
         await test.step('Verify exactly the failing criteria errors are shown', async () => {
-          for (const criterion of CRITERIA) {
-            const expected = failing.includes(criterion);
+          for (const criterion of ELIGIBILITY_CRITERIA) {
+            const expected = isCriterionFailing(failing, criterion);
             expect
-              .soft(
-                toasts.some((t) => t.includes(MESSAGES[criterion])),
-                `${criterion} error should ${expected ? '' : 'NOT '}be shown`,
-              )
+              .soft(toastsShowCriterion(toasts, criterion), `${criterion} error should ${expected ? '' : 'NOT '}be shown`)
               .toBe(expected);
           }
-          const known = Object.values(MESSAGES);
-          expect
-            .soft(
-              toasts.filter((t) => !known.some((m) => t.includes(m))),
-              'no other errors are shown',
-            )
-            .toEqual([]);
-          for (const old of RETIRED_MESSAGES)
-            expect.soft(toasts.join(' '), 'retired message is not shown').not.toContain(old);
+          expect.soft(unexpectedEligibilityToasts(toasts), 'no other errors are shown').toEqual([]);
+          expect.soft(retiredEligibilityMessagesShown(toasts), 'no retired message is shown').toEqual([]);
         });
 
         await test.step('Verify the New Deal form does not open', async () => {

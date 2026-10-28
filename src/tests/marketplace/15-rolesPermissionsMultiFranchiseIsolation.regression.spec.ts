@@ -1,11 +1,15 @@
-import { test, expect } from '../../fixtures/testFixtures';
-import { MarketplacePage, MarketplaceDealPage } from '../../modules/marketplace';
-import { HomePage } from '../../modules/dashboard';
-import { SellerLeadPage } from '../../modules/seller';
-import { envConfig } from '../../config/env.config';
-import { listWithDirectInvite, openDealAs, type DirectInviteDeal } from '../../utils/directInvite';
-import type { Page } from '@playwright/test';
-import { tileWindow } from '../../utils/windowLayout';
+import { test, expect } from '@fixtures/testFixtures';
+import { franchiseStatusPattern } from '@modules/marketplace';
+import { envConfig } from '@config/env.config';
+import {
+  closeDealFromOpportunity,
+  listFreshDeal,
+  openDealAs,
+  openDealFromOpportunity,
+  placeBidExpectingSuccess,
+} from '@utils/directInvite';
+import { tileWindow } from '@utils/windowLayout';
+import { Logger } from '@utils/logger';
 
 /**
  * Workflow suite for the Marketplace_Master sheet's workflow:
@@ -69,33 +73,6 @@ const DELEGATE_FRANCHISE = envConfig.FRANCHISE_A_NAME;
 const BUYER_FRANCHISE = envConfig.FRANCHISE_B_NAME;
 const OTHER_FRANCHISE = envConfig.FRANCHISE_A_OTHER_NAME;
 
-/** Home / Seller / Marketplace POMs for a role session (role fixtures are bare pages). */
-function rolePoms(page: Page) {
-  return {
-    home: new HomePage(page),
-    seller: new SellerLeadPage(page),
-    marketplace: new MarketplacePage(page),
-    dealPage: new MarketplaceDealPage(page),
-  };
-}
-
-/** The owner's other franchise bids on `mpdId`. */
-async function bidAsOtherFranchise(
-  marketplace: MarketplacePage,
-  dealPage: MarketplaceDealPage,
-  mpdId: string,
-  reason: string,
-) {
-  expect(
-    await openDealAs(marketplace, dealPage, mpdId, 'Available', OTHER_FRANCHISE),
-    `${mpdId} in the other franchise's Available deals`,
-  ).toBe(true);
-  await dealPage.openPlaceBidConfirmation(reason);
-  await dealPage.submitPlaceBidConfirmation();
-  expect(await dealPage.waitForToastText()).toMatch(/successfully bid/i);
-  await dealPage.close();
-}
-
 test.describe('Roles: the Marketplace Delegate acts for the franchise owner @regression @MarketplaceRolesPermissionsMultiFranchiseIsolation @TwoAccount', () => {
   test.describe.configure({ timeout: 900_000 });
 
@@ -108,35 +85,45 @@ test.describe('Roles: the Marketplace Delegate acts for the franchise owner @reg
   test(
     'The Marketplace Delegate lists a seller op, opens it from View in Marketplace and withdraws it @regression',
     { tag: '@ROLE-01' },
-    async ({ coordinatorRolePage }) => {
-      const d = rolePoms(coordinatorRolePage);
-      let deal!: DirectInviteDeal;
+    async ({
+      coordinatorHomePage,
+      coordinatorSellerLeadPage,
+      coordinatorMarketplacePage,
+      coordinatorMarketplaceDealPage,
+    }) => {
+      const deal = await test.step('The Delegate lists a new seller op of the franchise as Assignment', async () => {
+        return listFreshDeal(
+          coordinatorHomePage,
+          coordinatorSellerLeadPage,
+          coordinatorMarketplacePage,
+          coordinatorMarketplaceDealPage,
+          'Assignment',
+          '',
+        );
+      });
 
-      await test.step('The Delegate lists a new seller op of the franchise as Assignment', async () => {
-        const listed = await listWithDirectInvite(d.home, d.seller, d.marketplace, d.dealPage, 'Assignment', '');
-        expect(listed, 'Freshly created seller op must show "List in Marketplace" to the Delegate').not.toBeNull();
-        deal = listed!;
-        expect(await d.dealPage.hasWithdrawDealOption(), 'the Delegate gets Withdraw Deal on the listing').toBe(true);
-        await d.dealPage.close();
+      await test.step('Verify the Delegate gets Withdraw Deal on the listing', async () => {
+        expect(
+          await coordinatorMarketplaceDealPage.hasWithdrawDealOption(),
+          'the Delegate gets Withdraw Deal on the listing',
+        ).toBe(true);
+        await coordinatorMarketplaceDealPage.close();
       });
 
       await test.step('The seller op now offers "View in Marketplace", which opens the deal', async () => {
-        await d.seller.navigateById(deal.oppId);
-        expect(await d.seller.getMarketplaceCtaText()).toMatch(/^View (in )?Marketplace/);
-        const opened = await d.seller.clickViewInMarketplace();
-        const fromOpp = new MarketplaceDealPage(opened);
-        await fromOpp.expectLoaded();
+        await coordinatorSellerLeadPage.navigateById(deal.oppId);
+        expect(await coordinatorSellerLeadPage.getMarketplaceCtaText()).toMatch(/^View (in )?Marketplace/);
+        const fromOpp = await openDealFromOpportunity(coordinatorSellerLeadPage);
         expect(await fromOpp.getMpdId()).toBe(deal.mpdId);
-        if (opened !== coordinatorRolePage) await opened.close();
-        else await fromOpp.close();
+        await closeDealFromOpportunity(coordinatorSellerLeadPage, fromOpp);
       });
 
       await test.step('The Delegate withdraws the deal — "Deal Withdrawn Successfully" and it leaves My Listed Deals', async () => {
-        expect(await openDealAs(d.marketplace, d.dealPage, deal.mpdId, 'My Listed Deals')).toBe(true);
-        await d.dealPage.withdrawDeal();
-        expect(await d.dealPage.waitForToastText()).toContain('Deal Withdrawn Successfully');
+        expect(await openDealAs(coordinatorMarketplacePage, coordinatorMarketplaceDealPage, deal.mpdId, 'My Listed Deals')).toBe(true);
+        await coordinatorMarketplaceDealPage.withdrawDeal();
+        expect(await coordinatorMarketplaceDealPage.waitForToastText()).toContain('Deal Withdrawn Successfully');
         expect(
-          await openDealAs(d.marketplace, d.dealPage, deal.mpdId, 'My Listed Deals'),
+          await openDealAs(coordinatorMarketplacePage, coordinatorMarketplaceDealPage, deal.mpdId, 'My Listed Deals'),
           'withdrawn deal leaves My Listed Deals',
         ).toBe(false);
       });
@@ -148,31 +135,30 @@ test.describe('Roles: the Marketplace Delegate acts for the franchise owner @reg
     'The Marketplace Delegate lists with a Direct Invite that reaches the invited franchise @regression',
     { tag: '@ROLE-02' },
     async ({
-      coordinatorRolePage,
-      otherFranchisePage,
+      coordinatorHomePage,
+      coordinatorSellerLeadPage,
+      coordinatorMarketplacePage,
+      coordinatorMarketplaceDealPage,
       otherFranchiseMarketplacePage,
       otherFranchiseMarketplaceDealPage,
     }) => {
-      const d = rolePoms(coordinatorRolePage);
       const o = otherFranchiseMarketplaceDealPage;
-      let deal!: DirectInviteDeal;
 
-      await test.step('The Delegate lists a new seller op with a Direct Invite to another franchise', async () => {
-        const listed = await listWithDirectInvite(
-          d.home,
-          d.seller,
-          d.marketplace,
-          d.dealPage,
+      const deal = await test.step('The Delegate lists a new seller op with a Direct Invite to another franchise', async () => {
+        const listed = await listFreshDeal(
+          coordinatorHomePage,
+          coordinatorSellerLeadPage,
+          coordinatorMarketplacePage,
+          coordinatorMarketplaceDealPage,
           'Assignment',
           OTHER_FRANCHISE,
         );
-        expect(listed, 'Freshly created seller op must show "List in Marketplace" to the Delegate').not.toBeNull();
-        deal = listed!;
-        await d.dealPage.close();
+        await coordinatorMarketplaceDealPage.close();
+        return listed;
       });
 
       await test.step('The invited franchise finds the invite under My Direct Invites with Accept/Decline Invite', async () => {
-        await otherFranchisePage.bringToFront();
+        await otherFranchiseMarketplacePage.bringToFront();
         expect(
           await openDealAs(otherFranchiseMarketplacePage, o, deal.mpdId, 'My Direct Invites', OTHER_FRANCHISE),
         ).toBe(true);
@@ -181,10 +167,10 @@ test.describe('Roles: the Marketplace Delegate acts for the franchise owner @reg
       });
 
       await test.step('The Delegate withdraws the invited deal again', async () => {
-        await coordinatorRolePage.bringToFront();
-        expect(await openDealAs(d.marketplace, d.dealPage, deal.mpdId, 'My Listed Deals')).toBe(true);
-        await d.dealPage.withdrawDeal();
-        expect(await d.dealPage.waitForToastText()).toContain('Deal Withdrawn Successfully');
+        await coordinatorMarketplacePage.bringToFront();
+        expect(await openDealAs(coordinatorMarketplacePage, coordinatorMarketplaceDealPage, deal.mpdId, 'My Listed Deals')).toBe(true);
+        await coordinatorMarketplaceDealPage.withdrawDeal();
+        expect(await coordinatorMarketplaceDealPage.waitForToastText()).toContain('Deal Withdrawn Successfully');
       });
     },
   );
@@ -194,40 +180,49 @@ test.describe('Roles: the Marketplace Delegate acts for the franchise owner @reg
     'The Marketplace Delegate accepts a bid for the franchise @regression',
     { tag: '@ROLE-03' },
     async ({
-      coordinatorRolePage,
-      otherFranchisePage,
+      coordinatorHomePage,
+      coordinatorSellerLeadPage,
+      coordinatorMarketplacePage,
+      coordinatorMarketplaceDealPage,
       otherFranchiseMarketplacePage,
       otherFranchiseMarketplaceDealPage,
     }) => {
-      const d = rolePoms(coordinatorRolePage);
-      let deal!: DirectInviteDeal;
+      const deal = await test.step('The Delegate lists an open Opportunity deal', async () => {
+        const listed = await listFreshDeal(
+          coordinatorHomePage,
+          coordinatorSellerLeadPage,
+          coordinatorMarketplacePage,
+          coordinatorMarketplaceDealPage,
+          'Opportunity',
+          '',
+        );
+        await coordinatorMarketplaceDealPage.close();
+        return listed;
+      });
 
-      await test.step('The Delegate lists an open Opportunity deal and another franchise bids on it', async () => {
-        const listed = await listWithDirectInvite(d.home, d.seller, d.marketplace, d.dealPage, 'Opportunity', '');
-        expect(listed, 'Freshly created seller op must show "List in Marketplace" to the Delegate').not.toBeNull();
-        deal = listed!;
-        await d.dealPage.close();
-        await otherFranchisePage.bringToFront();
-        await bidAsOtherFranchise(
+      await test.step('Another franchise bids on it', async () => {
+        await otherFranchiseMarketplacePage.bringToFront();
+        await placeBidExpectingSuccess(
           otherFranchiseMarketplacePage,
           otherFranchiseMarketplaceDealPage,
           deal.mpdId,
           'Bid for the Delegate to accept',
+          OTHER_FRANCHISE,
         );
       });
 
       await test.step('The Delegate accepts that bid — success message, Deal Stage Bid Accepted, the bidder wins', async () => {
-        await coordinatorRolePage.bringToFront();
-        expect(await openDealAs(d.marketplace, d.dealPage, deal.mpdId, 'My Listed Deals')).toBe(true);
-        await d.dealPage.openBidDecisionFor('Accept', OTHER_FRANCHISE);
-        await d.dealPage.confirmBidDecision('Accept');
-        expect(await d.dealPage.waitForToastText()).toContain('The Marketplace Bid has been Accepted');
-        expect(await openDealAs(d.marketplace, d.dealPage, deal.mpdId, 'My Listed Deals')).toBe(true);
-        expect((await d.dealPage.getAdditionalFields())['Deal Stage']).toBe('Bid Accepted');
-        expect(await d.dealPage.getDealDialogText()).toContain(
+        await coordinatorMarketplacePage.bringToFront();
+        expect(await openDealAs(coordinatorMarketplacePage, coordinatorMarketplaceDealPage, deal.mpdId, 'My Listed Deals')).toBe(true);
+        await coordinatorMarketplaceDealPage.openBidDecisionFor('Accept', OTHER_FRANCHISE);
+        await coordinatorMarketplaceDealPage.confirmBidDecision('Accept');
+        expect(await coordinatorMarketplaceDealPage.waitForToastText()).toContain('The Marketplace Bid has been Accepted');
+        expect(await openDealAs(coordinatorMarketplacePage, coordinatorMarketplaceDealPage, deal.mpdId, 'My Listed Deals')).toBe(true);
+        expect(await coordinatorMarketplaceDealPage.getDealStage()).toBe('Bid Accepted');
+        expect(await coordinatorMarketplaceDealPage.getDealDialogText()).toContain(
           `The winning franchise for this deal is: ${OTHER_FRANCHISE}.`,
         );
-        await d.dealPage.close();
+        await coordinatorMarketplaceDealPage.close();
       });
     },
   );
@@ -237,41 +232,50 @@ test.describe('Roles: the Marketplace Delegate acts for the franchise owner @reg
     'The Marketplace Delegate declines a bid for the franchise @regression',
     { tag: '@ROLE-04' },
     async ({
-      coordinatorRolePage,
-      otherFranchisePage,
+      coordinatorHomePage,
+      coordinatorSellerLeadPage,
+      coordinatorMarketplacePage,
+      coordinatorMarketplaceDealPage,
       otherFranchiseMarketplacePage,
       otherFranchiseMarketplaceDealPage,
     }) => {
-      const d = rolePoms(coordinatorRolePage);
-      let deal!: DirectInviteDeal;
+      const deal = await test.step('The Delegate lists an open Assignment deal', async () => {
+        const listed = await listFreshDeal(
+          coordinatorHomePage,
+          coordinatorSellerLeadPage,
+          coordinatorMarketplacePage,
+          coordinatorMarketplaceDealPage,
+          'Assignment',
+          '',
+        );
+        await coordinatorMarketplaceDealPage.close();
+        return listed;
+      });
 
-      await test.step('The Delegate lists an open Assignment deal and another franchise bids on it', async () => {
-        const listed = await listWithDirectInvite(d.home, d.seller, d.marketplace, d.dealPage, 'Assignment', '');
-        expect(listed, 'Freshly created seller op must show "List in Marketplace" to the Delegate').not.toBeNull();
-        deal = listed!;
-        await d.dealPage.close();
-        await otherFranchisePage.bringToFront();
-        await bidAsOtherFranchise(
+      await test.step('Another franchise bids on it', async () => {
+        await otherFranchiseMarketplacePage.bringToFront();
+        await placeBidExpectingSuccess(
           otherFranchiseMarketplacePage,
           otherFranchiseMarketplaceDealPage,
           deal.mpdId,
           'Bid for the Delegate to decline',
+          OTHER_FRANCHISE,
         );
       });
 
       await test.step('The Delegate declines that bid — the bid shows as Declined', async () => {
-        await coordinatorRolePage.bringToFront();
-        expect(await openDealAs(d.marketplace, d.dealPage, deal.mpdId, 'My Listed Deals')).toBe(true);
-        await d.dealPage.openBidDecisionFor('Decline', OTHER_FRANCHISE);
-        await d.dealPage.confirmBidDecision('Decline');
-        expect(await d.dealPage.waitForToastText()).toMatch(/Bid has been Declined/i);
-        expect(await openDealAs(d.marketplace, d.dealPage, deal.mpdId, 'My Listed Deals')).toBe(true);
-        expect(await d.dealPage.getDealDialogText()).toMatch(new RegExp(`${OTHER_FRANCHISE}.*Declined`));
+        await coordinatorMarketplacePage.bringToFront();
+        expect(await openDealAs(coordinatorMarketplacePage, coordinatorMarketplaceDealPage, deal.mpdId, 'My Listed Deals')).toBe(true);
+        await coordinatorMarketplaceDealPage.openBidDecisionFor('Decline', OTHER_FRANCHISE);
+        await coordinatorMarketplaceDealPage.confirmBidDecision('Decline');
+        expect(await coordinatorMarketplaceDealPage.waitForToastText()).toMatch(/Bid has been Declined/i);
+        expect(await openDealAs(coordinatorMarketplacePage, coordinatorMarketplaceDealPage, deal.mpdId, 'My Listed Deals')).toBe(true);
+        expect(await coordinatorMarketplaceDealPage.getDealDialogText()).toMatch(franchiseStatusPattern(OTHER_FRANCHISE, 'Declined'));
       });
 
       await test.step('The Delegate withdraws the deal afterwards', async () => {
-        await d.dealPage.withdrawDeal();
-        expect(await d.dealPage.waitForToastText()).toContain('Deal Withdrawn Successfully');
+        await coordinatorMarketplaceDealPage.withdrawDeal();
+        expect(await coordinatorMarketplaceDealPage.waitForToastText()).toContain('Deal Withdrawn Successfully');
       });
     },
   );
@@ -281,47 +285,44 @@ test.describe('Roles: the Marketplace Delegate acts for the franchise owner @reg
     "The invited franchise's Marketplace Delegate accepts a Direct Invite @regression",
     { tag: '@ROLE-05' },
     async ({
-      coordinatorRolePage,
-      otherFranchisePage,
+      coordinatorMarketplacePage,
+      coordinatorMarketplaceDealPage,
       otherFranchiseHomePage,
+      otherFranchiseSellerLeadPage,
       otherFranchiseMarketplacePage,
       otherFranchiseMarketplaceDealPage,
     }) => {
-      const d = rolePoms(coordinatorRolePage);
-      let deal!: DirectInviteDeal;
-
-      await test.step("Another franchise lists a new seller op with a Direct Invite to the Delegate's franchise", async () => {
-        await otherFranchisePage.bringToFront();
-        const listed = await listWithDirectInvite(
+      const deal = await test.step("Another franchise lists a new seller op with a Direct Invite to the Delegate's franchise", async () => {
+        await otherFranchiseMarketplacePage.bringToFront();
+        const listed = await listFreshDeal(
           otherFranchiseHomePage,
-          new SellerLeadPage(otherFranchisePage),
+          otherFranchiseSellerLeadPage,
           otherFranchiseMarketplacePage,
           otherFranchiseMarketplaceDealPage,
           'Assignment',
           DELEGATE_FRANCHISE,
           { accountName: OTHER_FRANCHISE },
         );
-        expect(listed, 'Freshly created seller op must show "List in Marketplace"').not.toBeNull();
-        deal = listed!;
         await otherFranchiseMarketplaceDealPage.close();
+        return listed;
       });
 
       await test.step('The Delegate gets Accept/Decline Invite under My Direct Invites', async () => {
-        await coordinatorRolePage.bringToFront();
-        expect(await openDealAs(d.marketplace, d.dealPage, deal.mpdId, 'My Direct Invites')).toBe(true);
-        await d.dealPage.selectFranchiseIfPresent(DELEGATE_FRANCHISE);
-        expect(await d.dealPage.hasInviteActions()).toBe(true);
+        await coordinatorMarketplacePage.bringToFront();
+        expect(await openDealAs(coordinatorMarketplacePage, coordinatorMarketplaceDealPage, deal.mpdId, 'My Direct Invites')).toBe(true);
+        await coordinatorMarketplaceDealPage.selectFranchiseIfPresent(DELEGATE_FRANCHISE);
+        expect(await coordinatorMarketplaceDealPage.hasInviteActions()).toBe(true);
       });
 
       await test.step("The Delegate accepts the invite — the deal is won for the Delegate's franchise", async () => {
-        await d.dealPage.openInviteConfirmation('Accept');
-        await d.dealPage.confirmInvite('Accept');
-        expect(await openDealAs(d.marketplace, d.dealPage, deal.mpdId, 'My Bids')).toBe(true);
-        expect((await d.dealPage.getAdditionalFields())['Deal Stage']).toBe('Bid Accepted');
-        expect(await d.dealPage.getDealDialogText()).toContain(
+        await coordinatorMarketplaceDealPage.openInviteConfirmation('Accept');
+        await coordinatorMarketplaceDealPage.confirmInvite('Accept');
+        expect(await openDealAs(coordinatorMarketplacePage, coordinatorMarketplaceDealPage, deal.mpdId, 'My Bids')).toBe(true);
+        expect(await coordinatorMarketplaceDealPage.getDealStage()).toBe('Bid Accepted');
+        expect(await coordinatorMarketplaceDealPage.getDealDialogText()).toContain(
           `The winning franchise for this deal is: ${DELEGATE_FRANCHISE}.`,
         );
-        await d.dealPage.close();
+        await coordinatorMarketplaceDealPage.close();
       });
     },
   );
@@ -343,63 +344,63 @@ test.describe('Roles: a Buyer has no Marketplace actions for their franchise @re
     "The Buyer never gets the franchise's listings, and cannot bid or list for it @regression",
     { tag: '@ROLE-06' },
     async ({
-      franchiseBPage,
-      buyerRolePage,
       franchiseBHomePage,
+      franchiseBSellerLeadPage,
       franchiseBMarketplacePage,
       franchiseBMarketplaceDealPage,
+      buyerSellerLeadPage,
+      buyerMarketplacePage,
+      buyerMarketplaceDealPage,
     }) => {
-      const buyer = rolePoms(buyerRolePage);
       const b = franchiseBMarketplaceDealPage;
-      let listedByB!: DirectInviteDeal;
 
-      await test.step('Franchise B lists an open deal', async () => {
-        await franchiseBPage.bringToFront();
-        listedByB = (await listWithDirectInvite(
+      const listedByB = await test.step('Franchise B lists an open deal', async () => {
+        await franchiseBMarketplacePage.bringToFront();
+        const listed = await listFreshDeal(
           franchiseBHomePage,
-          new SellerLeadPage(franchiseBPage),
+          franchiseBSellerLeadPage,
           franchiseBMarketplacePage,
           b,
           'Assignment',
           '',
           { accountName: BUYER_FRANCHISE },
-        ))!;
-        expect(listedByB, 'fresh seller op lists').toBeTruthy();
+        );
         await b.close();
+        return listed;
       });
 
       // Covers: ST_005, RA_004
       await test.step("On the franchise's listed seller op the Buyer gets no List / View in Marketplace CTA", async () => {
-        await buyerRolePage.bringToFront();
-        await buyer.seller.navigateById(listedByB.oppId);
-        await buyerRolePage.waitForTimeout(5000); // the CTA renders late for permitted users; give it the same chance
-        expect(await buyer.seller.hasMarketplaceCta()).toBe(false);
+        await buyerMarketplacePage.bringToFront();
+        await buyerSellerLeadPage.navigateById(listedByB.oppId);
+        // The CTA renders late for permitted users; give it the same chance before calling it absent
+        expect(await buyerSellerLeadPage.hasMarketplaceCta(5000)).toBe(false);
       });
 
       // Covers: RA_004, RA_005, BW_010, TC_012
       await test.step('The Buyer can open the Marketplace, but the franchise is never offered as the Bidding Franchise', async () => {
-        await buyer.marketplace.navigate();
-        await buyer.marketplace.expectMarketplaceLoaded();
+        await buyerMarketplacePage.navigate();
+        await buyerMarketplacePage.expectMarketplaceLoaded();
         expect(
-          await buyer.marketplace.getDealCardCount(),
+          await buyerMarketplacePage.getDealCardCount(),
           'the Buyer sees Available deals (as their other franchise)',
         ).toBeGreaterThan(0);
-        await buyer.marketplace.openDealByIndex(0);
-        await buyer.dealPage.expectLoaded();
-        const options = await buyer.dealPage.getBiddingFranchiseOptions();
-        console.log(`  [Buyer] Bidding Franchise options: ${JSON.stringify(options)}`);
+        await buyerMarketplacePage.openDealByIndex(0);
+        await buyerMarketplaceDealPage.expectLoaded();
+        const options = await buyerMarketplaceDealPage.getBiddingFranchiseOptions();
+        Logger.log(`  [Buyer] Bidding Franchise options: ${JSON.stringify(options)}`);
         expect(options).not.toContain(BUYER_FRANCHISE);
-        await buyer.dealPage.close();
+        await buyerMarketplaceDealPage.close();
       });
 
       // Covers: RA_006, RA_007, SAN_003, SD_026
       await test.step("The franchise's own listing never reaches the Buyer, so there is no Accept/Decline Bid or Withdraw Deal", async () => {
-        expect(await openDealAs(buyer.marketplace, buyer.dealPage, listedByB.mpdId, 'My Listed Deals')).toBe(false);
-        expect(await openDealAs(buyer.marketplace, buyer.dealPage, listedByB.mpdId, 'Available')).toBe(false);
+        expect(await openDealAs(buyerMarketplacePage, buyerMarketplaceDealPage, listedByB.mpdId, 'My Listed Deals')).toBe(false);
+        expect(await openDealAs(buyerMarketplacePage, buyerMarketplaceDealPage, listedByB.mpdId, 'Available')).toBe(false);
       });
 
       await test.step('Clean up: Franchise B withdraws the deal', async () => {
-        await franchiseBPage.bringToFront();
+        await franchiseBMarketplacePage.bringToFront();
         expect(
           await openDealAs(franchiseBMarketplacePage, b, listedByB.mpdId, 'My Listed Deals', BUYER_FRANCHISE),
         ).toBe(true);
@@ -426,30 +427,24 @@ test.describe('Roles: multi-franchise context isolation @regression @Marketplace
     { tag: '@ROLE-07' },
     async ({ authedHomePage, authedSellerLeadPage, authedMarketplacePage, authedMarketplaceDealPage }) => {
       const a = authedMarketplaceDealPage;
-      let open!: DirectInviteDeal;
-      let invite!: DirectInviteDeal;
 
-      await test.step("Franchise A lists one open deal and one Direct Invite to the owner's other franchise", async () => {
-        open = (await listWithDirectInvite(
-          authedHomePage,
-          authedSellerLeadPage,
-          authedMarketplacePage,
-          a,
-          'Assignment',
-          '',
-        ))!;
-        expect(open, 'fresh seller op lists').toBeTruthy();
+      const open = await test.step('Franchise A lists one open deal', async () => {
+        const listed = await listFreshDeal(authedHomePage, authedSellerLeadPage, authedMarketplacePage, a, 'Assignment', '');
         await a.close();
-        invite = (await listWithDirectInvite(
+        return listed;
+      });
+
+      const invite = await test.step("Franchise A lists one Direct Invite to the owner's other franchise", async () => {
+        const listed = await listFreshDeal(
           authedHomePage,
           authedSellerLeadPage,
           authedMarketplacePage,
           a,
           'Assignment',
           OTHER_FRANCHISE,
-        ))!;
-        expect(invite, 'fresh seller op lists').toBeTruthy();
+        );
         await a.close();
+        return listed;
       });
 
       // Covers: RA_010, SAN_005

@@ -1,16 +1,17 @@
 import { chromium, type FullConfig } from '@playwright/test';
 import { rmSync } from 'fs';
 import { envConfig } from './env.config';
-import { configuredAccounts, hasFreshSession, loginAndSaveSession, storageStatePath } from '../utils/sessionStore';
+import { configuredAccounts, hasFreshSession, loginAndSaveSession, storageStatePath } from '@utils/sessionStore';
+import { Logger } from '@utils/logger';
 
 /**
  * Global Setup — runs once before all tests.
  * Validates the environment and logs every configured account in once,
  * saving each session to .auth/<ENV>/<account>.json for the fixtures to reuse.
  */
-async function globalSetup(_config: FullConfig) {
-  console.log(`\n🚀 Global Setup — Environment: ${envConfig.ENV}`);
-  console.log(`   Base URL: ${envConfig.BASE_URL}`);
+async function globalSetup(_config: FullConfig): Promise<void> {
+  Logger.log(`\n🚀 Global Setup — Environment: ${envConfig.ENV}`);
+  Logger.log(`   Base URL: ${envConfig.BASE_URL}`);
 
   if (!envConfig.UGVILLE_USERNAME || !envConfig.UGVILLE_PASSWORD) {
     throw new Error(
@@ -28,7 +29,7 @@ async function globalSetup(_config: FullConfig) {
   rmSync(process.env.ALLURE_RESULTS_DIR || 'allure-results', { recursive: true, force: true });
 
   await saveAllSessions();
-  console.log('');
+  Logger.log('');
 }
 
 /**
@@ -36,12 +37,12 @@ async function globalSetup(_config: FullConfig) {
  * parallel (each in its own context). A failed secondary login is only a
  * warning: its fixture retries the UI login, and skips when unconfigured.
  */
-async function saveAllSessions() {
+async function saveAllSessions(): Promise<void> {
   const accounts = configuredAccounts();
   const stale = accounts.filter((a) => !hasFreshSession(a.key));
   accounts
     .filter((a) => !stale.includes(a))
-    .forEach((a) => console.log(`   🔑 ${a.key}: reusing saved session (${storageStatePath(a.key)})`));
+    .forEach((a) => Logger.log(`   🔑 ${a.key}: reusing saved session (${storageStatePath(a.key)})`));
   if (!stale.length) return;
 
   const browser = await chromium.launch({ channel: 'chrome', headless: true });
@@ -50,11 +51,11 @@ async function saveAllSessions() {
     results.forEach((result, i) => {
       const { key } = stale[i];
       if (result.status === 'fulfilled') {
-        console.log(`   🔑 ${key}: logged in, session saved`);
+        Logger.log(`   🔑 ${key}: logged in, session saved`);
       } else if (key === 'primary') {
         throw new Error(`Primary account login failed in globalSetup: ${result.reason}`);
       } else {
-        console.warn(`   ⚠️  ${key}: login failed in globalSetup, its fixture will retry — ${result.reason}`);
+        Logger.log(`   ⚠️  ${key}: login failed in globalSetup, its fixture will retry — ${result.reason}`);
       }
     });
   } finally {

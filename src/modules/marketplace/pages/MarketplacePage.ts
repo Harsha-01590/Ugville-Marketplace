@@ -1,7 +1,7 @@
 import { type Page, type Locator, type FrameLocator, expect } from '@playwright/test';
-import { BasePage } from '../../../shared/pages/base/BasePage';
-import { Routes } from '../../../enums/routes.enum';
-import { Logger } from '../../../utils/logger';
+import { BasePage } from '@shared/pages/base/BasePage';
+import { Routes } from '@enums/routes.enum';
+import { Logger } from '@utils/logger';
 
 export type DealStatus = 'Available' | 'My Direct Invites' | 'My Listed Deals' | 'My Bids' | 'Archived';
 export type DealType = 'All' | 'Assignment' | 'Opportunity';
@@ -23,8 +23,6 @@ export type MarketplaceBidStage = 'All' | 'In Review' | 'Accepted' | 'Lost';
  * detail as a modal dialog — see `MarketplaceDealPage`, not a page nav.
  */
 export class MarketplacePage extends BasePage {
-  // ==================== Locators ====================
-
   /**
    * First-ever visit to Marketplace for an account gates the entire deal
    * list behind a one-time "Marketplace Terms & Conditions" consent dialog
@@ -65,12 +63,18 @@ export class MarketplacePage extends BasePage {
   private readonly lastActivityDropdown: Locator;
   private readonly daysInSystemDropdown: Locator;
   private readonly daysInMarketplaceDropdown: Locator;
-  /** Same dynamic-label behavior as filtersButton above: "Reset" with nothing to reset, "Reset Filters" once filters are active. */
+  /**
+   * Same dynamic-label behavior as filtersButton above: "Reset" with nothing to reset, "Reset Filters" once filters are
+   * active.
+   */
   private readonly resetFiltersButton: Locator;
   private readonly applyFiltersButton: Locator;
   /** Each deal card as a container, keyed off its own "View Deal" button. */
   private readonly dealCardButtons: Locator;
-  /** "Save Filter" (Filters panel) — pick an existing saved filter to overwrite or Create New, plus the notify checkbox (live-verified QA 2026-10-09). */
+  /**
+   * "Save Filter" (Filters panel) — pick an existing saved filter to overwrite or Create New, plus the notify checkbox
+   * (live-verified QA 2026-10-09).
+   */
   private readonly saveFilterDialog: Locator;
   private readonly notifyCheckbox: Locator;
   /** The embedded map — Salesforce's Lightning Maps component, itself wrapping Google Maps. */
@@ -123,8 +127,38 @@ export class MarketplacePage extends BasePage {
   /** The "Active filters:" summary shown above the list while filters are applied. */
   readonly activeFiltersSummary: Locator;
 
+  readonly getViewButton: (view: MarketplaceView) => Locator;
+  /** An existing saved filter listed in the Save Filter dialog (the overwrite target). */
+  readonly getSaveFilterOverwriteOption: (name: string) => Locator;
+  /**
+   * Live-verified: the closest ancestor containing "MPD-" is `div.deal-name-action-row`
+   * (just the deal ID next to the button) — a sibling of, not an ancestor of, the info
+   * column that actually holds location/Est. ARV/Stage/Last Activity/Opp Age/Listing
+   * Age. Requiring "Opp Age" too climbs to the real per-card container that has both.
+   *
+   * Live-verified (2026-08-11): that "Opp Age" heuristic only holds in Grid
+   * view, where it repeats per card. In List view it's a single column
+   * header, so the climb overshoots to the whole `<table>` for every row —
+   * `self::tr` is checked first and, being the nearer ancestor whenever a
+   * `<tr>` exists (List view), wins before the climb ever reaches that far.
+   */
+  readonly getDealCard: (index: number) => Locator;
+  /** A card's location line — its own `.prop-details` element. */
+  readonly getCardLocationElement: (index: number) => Locator;
+  /**
+   * The parent of a card's `<span class="mp-deal-details">Label:</span>` — the
+   * value is a trailing text node there, not inside the label span.
+   */
+  readonly getCardLabelledValue: (index: number, label: RegExp) => Locator;
+  readonly getCardDealTypeBadgeElement: (index: number) => Locator;
+  readonly getMapMarkerForZip: (zip: string) => Locator;
+  /** An option of the open dropdown, by its accessible name. */
+  readonly getDropdownOption: (name: string, exact?: boolean) => Locator;
+
   constructor(page: Page) {
     super(page);
+    // No data-testid exists in this UI (Salesforce LWR site; confirmed via live inspection of QA on 2026-10-27,
+    // shadow DOM included), so every locator below falls back to role/text/CSS.
     this.termsAgreeButton = page.getByRole('button', { name: 'Agree', exact: true });
     this.searchInput = page.getByPlaceholder('Search by deal name or location...');
     this.filtersButton = page.getByRole('button', { name: /^Filters(\s\(\d+\))?$/ });
@@ -151,8 +185,10 @@ export class MarketplacePage extends BasePage {
     this.saveFilterDialog = page
       .getByRole('dialog')
       .filter({ hasText: 'Select an existing saved filter to overwrite' });
+    // Renamed from "Get notifications for deals that match…" (live-verified QA 2026-10-28); the Email / SMS /
+    // Mobile Push / UGVille Push channel checkboxes below it are separate.
     this.notifyCheckbox = this.saveFilterDialog.getByRole('checkbox', {
-      name: /Get notifications for deals that match your saved filter criteria/,
+      name: 'Enable notifications for this saved filter',
     });
     this.mapFrame = page.frameLocator('iframe[title="Map of Locations"]');
     this.mapMarkers = this.mapFrame.getByRole('button', { name: /Deals? \| ZIP \d{5}/ });
@@ -173,66 +209,23 @@ export class MarketplacePage extends BasePage {
     this.filtersButtonWithActiveFilters = page.getByRole('button', { name: /^Filters \(\d+\)$/ });
     this.filtersButtonWithNoFilters = page.getByRole('button', { name: 'Filters', exact: true });
     this.activeFiltersSummary = page.getByText('Active filters:');
+    this.getViewButton = (view) => page.getByRole('button', { name: view, exact: true });
+    this.getSaveFilterOverwriteOption = (name) => this.saveFilterDialog.getByText(name, { exact: true });
+    this.getDealCard = (index) =>
+      this.dealCardButtons
+        .nth(index)
+        .locator(
+          'xpath=ancestor::*[self::tr or (.//text()[contains(., "MPD-")] and .//text()[contains(., "Opp Age")])][1]',
+        );
+    this.getCardLocationElement = (index) => this.getDealCard(index).locator('.prop-details').first();
+    this.getCardLabelledValue = (index, label) => this.getDealCard(index).getByText(label).first().locator('xpath=..');
+    this.getCardDealTypeBadgeElement = (index) =>
+      this.getDealCard(index)
+        .getByText(/^(Assignment|Buy|Sell)$/)
+        .first();
+    this.getMapMarkerForZip = (zip) => this.mapFrame.getByRole('button', { name: new RegExp(`Deals? \\| ZIP ${zip}`) });
+    this.getDropdownOption = (name, exact = true) => page.getByRole('option', { name, exact });
   }
-
-  viewButton(view: MarketplaceView): Locator {
-    return this.page.getByRole('button', { name: view, exact: true });
-  }
-
-  /** An option of the open dropdown, by its accessible name. */
-  private dropdownOption(name: string, exact = true): Locator {
-    return this.page.getByRole('option', { name, exact });
-  }
-
-  /** An existing saved filter listed in the Save Filter dialog (the overwrite target). */
-  private saveFilterOverwriteOption(name: string): Locator {
-    return this.saveFilterDialog.getByText(name, { exact: true });
-  }
-
-  /**
-   * Live-verified: the closest ancestor containing "MPD-" is `div.deal-name-action-row`
-   * (just the deal ID next to the button) — a sibling of, not an ancestor of, the info
-   * column that actually holds location/Est. ARV/Stage/Last Activity/Opp Age/Listing
-   * Age. Requiring "Opp Age" too climbs to the real per-card container that has both.
-   *
-   * Live-verified (2026-08-11): that "Opp Age" heuristic only holds in Grid
-   * view, where it repeats per card. In List view it's a single column
-   * header, so the climb overshoots to the whole `<table>` for every row —
-   * `self::tr` is checked first and, being the nearer ancestor whenever a
-   * `<tr>` exists (List view), wins before the climb ever reaches that far.
-   */
-  private dealCard(index: number): Locator {
-    return this.dealCardButtons
-      .nth(index)
-      .locator(
-        'xpath=ancestor::*[self::tr or (.//text()[contains(., "MPD-")] and .//text()[contains(., "Opp Age")])][1]',
-      );
-  }
-
-  /** A card's location line — its own `.prop-details` element. */
-  private cardLocation(index: number): Locator {
-    return this.dealCard(index).locator('.prop-details').first();
-  }
-
-  /**
-   * The parent of a card's `<span class="mp-deal-details">Label:</span>` — the
-   * value is a trailing text node there, not inside the label span.
-   */
-  private cardLabelledValue(index: number, label: RegExp): Locator {
-    return this.dealCard(index).getByText(label).first().locator('xpath=..');
-  }
-
-  private cardDealTypeBadge(index: number): Locator {
-    return this.dealCard(index)
-      .getByText(/^(Assignment|Buy|Sell)$/)
-      .first();
-  }
-
-  private mapMarkerForZip(zip: string): Locator {
-    return this.mapFrame.getByRole('button', { name: new RegExp(`Deals? \\| ZIP ${zip}`) });
-  }
-
-  // ==================== Navigation ====================
 
   /**
    * Click the "Marketplace" quick link on the Home page. Live-verified: this
@@ -245,7 +238,7 @@ export class MarketplacePage extends BasePage {
    * reliably end up on the listing on one page/tab regardless of which way
    * the click behaved.
    */
-  async openFromHome() {
+  async openFromHome(): Promise<void> {
     const link = this.homeMarketplaceLink;
     await link.waitFor({ state: 'visible', timeout: 30000 });
     const context = this.page.context();
@@ -260,13 +253,13 @@ export class MarketplacePage extends BasePage {
   }
 
   /** Go directly to the Marketplace deal list. */
-  async navigate() {
+  async navigate(): Promise<void> {
     await this.page.goto(Routes.MARKETPLACE);
     await this.waitForStabilization(2000);
     await this.dismissTermsIfPresent();
   }
 
-  private async dismissTermsIfPresent() {
+  async dismissTermsIfPresent(): Promise<void> {
     if (await this.termsAgreeButton.isVisible({ timeout: 3000 }).catch(() => false)) {
       Logger.info('[Marketplace] One-time Terms & Conditions dialog present — accepting it');
       await this.termsAgreeButton.click();
@@ -274,72 +267,69 @@ export class MarketplacePage extends BasePage {
     }
   }
 
-  // ==================== Top bar Actions ====================
-
-  async searchMarketplace(query: string) {
+  async searchMarketplace(query: string): Promise<void> {
     await this.searchInput.waitFor({ state: 'visible', timeout: 15000 });
     await this.searchInput.fill(query);
     await this.searchInput.press('Enter');
     await this.waitForStabilization(2000);
   }
 
-  async clearSearch() {
+  async clearSearch(): Promise<void> {
     await this.searchInput.fill('');
     await this.searchInput.press('Enter');
     await this.waitForStabilization(1500);
   }
 
-  async selectSort(option: 'Sort: Newest' | 'Sort: Oldest') {
+  async selectSort(option: 'Sort: Newest' | 'Sort: Oldest'): Promise<void> {
     await this.sortSelect.selectOption({ label: option });
     await this.waitForStabilization(1500);
   }
 
-  async switchView(view: MarketplaceView) {
-    await this.viewButton(view).click();
+  async switchView(view: MarketplaceView): Promise<void> {
+    await this.getViewButton(view).click();
     await this.waitForStabilization(1500);
   }
 
-  async refresh() {
+  async refresh(): Promise<void> {
     await this.refreshButton.click();
     await this.waitForStabilization(1500);
   }
 
   /** Accepts the Marketplace Terms & Conditions modal if it's shown (first-time visit only). */
-  async acceptTermsIfPresent() {
+  async acceptTermsIfPresent(): Promise<boolean> {
     if (!(await this.termsAcceptButton.isVisible({ timeout: 5000 }).catch(() => false))) return false;
     await this.termsAcceptButton.click();
     await this.waitForStabilization(2000);
     return true;
   }
 
-  // ==================== Filters panel Actions ====================
-
-  async openFilters() {
+  async openFilters(): Promise<void> {
     if (await this.filtersPanelHeading.isVisible().catch(() => false)) return;
     await this.filtersButton.click();
     await this.filtersPanelHeading.waitFor({ state: 'visible', timeout: 10000 });
   }
 
-  async selectSavedFilter(name: string) {
+  async selectSavedFilter(name: string): Promise<void> {
     await this.openFilters();
     await this.savedFilterDropdown.selectOption({ label: name });
   }
 
-  async selectDealStatus(status: DealStatus) {
+  async selectDealStatus(status: DealStatus): Promise<void> {
     await this.openFilters();
     await this.dealStatusDropdown.click();
-    await this.dropdownOption(status).click();
+    await this.getDropdownOption(status).click();
   }
 
-  async selectDealType(type: DealType) {
+  async selectDealType(type: DealType): Promise<void> {
     await this.openFilters();
     await this.dealTypeDropdown.click();
-    await this.dropdownOption(type).click();
+    await this.getDropdownOption(type).click();
   }
 
-  async enterZipCode(zip: string) {
+  async enterZipCode(zip: string): Promise<void> {
     await this.openFilters();
-    // Typed, not filled: the field's keystroke filter drops letters (QA 2026-10-21: "12a45" → "1245"), and fill() bypasses it.
+    // Typed, not filled: the field's keystroke filter drops letters (QA 2026-10-21: "12a45" → "1245"), and fill()
+    // bypasses it.
     await this.zipCodeInput.fill('');
     await this.zipCodeInput.pressSequentially(zip);
     // The Radius enable and State mutual-exclusion reaction is debounced,
@@ -348,36 +338,36 @@ export class MarketplacePage extends BasePage {
     await this.waitForStabilization(1500);
   }
 
-  async selectRadius(label: string) {
+  async selectRadius(label: string): Promise<void> {
     await this.openFilters();
     await this.radiusDropdown.click();
-    await this.dropdownOption(label, false).click();
+    await this.getDropdownOption(label, false).click();
   }
 
-  async selectState(state: string) {
+  async selectState(state: string): Promise<void> {
     await this.openFilters();
     await this.stateDropdown.click();
-    await this.dropdownOption(state).click();
+    await this.getDropdownOption(state).click();
   }
 
-  async selectOpportunityStage(stage: MarketplaceStage) {
+  async selectOpportunityStage(stage: MarketplaceStage): Promise<void> {
     await this.openFilters();
     await this.opportunityStageDropdown.click();
-    await this.dropdownOption(stage).click();
+    await this.getDropdownOption(stage).click();
   }
 
   /** Deal Stage sub-filter — only visible once Deal Status = "My Listed Deals" is selected. */
-  async selectDealStage(stage: MarketplaceDealStage) {
+  async selectDealStage(stage: MarketplaceDealStage): Promise<void> {
     await this.openFilters();
     await this.dealStageDropdown.click();
-    await this.dropdownOption(stage).click();
+    await this.getDropdownOption(stage).click();
   }
 
   /** Bid Stage sub-filter — only visible once Deal Status = "My Bids" is selected. */
-  async selectBidStage(stage: MarketplaceBidStage) {
+  async selectBidStage(stage: MarketplaceBidStage): Promise<void> {
     await this.openFilters();
     await this.bidStageDropdown.click();
-    await this.dropdownOption(stage).click();
+    await this.getDropdownOption(stage).click();
   }
 
   async isDealStageFilterVisible(): Promise<boolean> {
@@ -390,22 +380,22 @@ export class MarketplacePage extends BasePage {
     return this.bidStageDropdown.isVisible().catch(() => false);
   }
 
-  async selectLastActivity(label: string) {
+  async selectLastActivity(label: string): Promise<void> {
     await this.openFilters();
     await this.lastActivityDropdown.click();
-    await this.dropdownOption(label, false).click();
+    await this.getDropdownOption(label, false).click();
   }
 
-  async selectDaysInSystem(label: string) {
+  async selectDaysInSystem(label: string): Promise<void> {
     await this.openFilters();
     await this.daysInSystemDropdown.click();
-    await this.dropdownOption(label, false).click();
+    await this.getDropdownOption(label, false).click();
   }
 
-  async selectDaysInMarketplace(label: string) {
+  async selectDaysInMarketplace(label: string): Promise<void> {
     await this.openFilters();
     await this.daysInMarketplaceDropdown.click();
-    await this.dropdownOption(label, false).click();
+    await this.getDropdownOption(label, false).click();
   }
 
   async isRadiusEnabled(): Promise<boolean> {
@@ -454,7 +444,7 @@ export class MarketplacePage extends BasePage {
    * a real UX guard, not a bug. Clicking is skipped in that case rather
    * than waiting out a timeout for a disabled button to become clickable.
    */
-  async applyFilters() {
+  async applyFilters(): Promise<void> {
     if (await this.applyFiltersButton.isEnabled().catch(() => false)) {
       // The button can flip back to disabled between the check and the click
       // (seen QA 2026-10-07 re-selecting a Deal Status) — that means there's
@@ -464,19 +454,19 @@ export class MarketplacePage extends BasePage {
     }
   }
 
-  async resetFilters() {
+  async resetFilters(): Promise<void> {
     await this.openFilters();
     await this.resetFiltersButton.click();
     await this.waitForStabilization(1500);
   }
 
   /** Collapses the Filters panel via its own "✕" (distinct from the inline info banner's dismiss). */
-  async closeFilters() {
+  async closeFilters(): Promise<void> {
     if (await this.filtersCloseButton.isVisible().catch(() => false)) await this.filtersCloseButton.click();
   }
 
   /** @alias closeFilters — named to match the spreadsheet's "Hide Filter Panel" cases. */
-  async hideFilterPanel() {
+  async hideFilterPanel(): Promise<void> {
     await this.closeFilters();
   }
 
@@ -484,18 +474,16 @@ export class MarketplacePage extends BasePage {
     return this.filtersPanelHeading.isVisible().catch(() => false);
   }
 
-  // ==================== Save Filter dialog ====================
-
   /** Save Filter is disabled until some filter is set — callers pick one first (Cancel then saves nothing). */
-  async openSaveFilterDialog() {
+  async openSaveFilterDialog(): Promise<void> {
     await this.openFilters();
     await this.saveFilterButton.click();
     await this.saveFilterDialog.waitFor({ state: 'visible', timeout: 15000 });
   }
 
   /** Selects an existing saved filter in the dialog (the overwrite target) — its own settings load into the form. */
-  async selectSavedFilterToOverwrite(name: string) {
-    await this.saveFilterOverwriteOption(name).click();
+  async selectSavedFilterToOverwrite(name: string): Promise<void> {
+    await this.getSaveFilterOverwriteOption(name).click();
     await this.waitForStabilization(1000);
   }
 
@@ -503,7 +491,7 @@ export class MarketplacePage extends BasePage {
     return this.notifyCheckbox.isChecked();
   }
 
-  async cancelSaveFilterDialog() {
+  async cancelSaveFilterDialog(): Promise<void> {
     await this.saveFilterCancelButton.click();
     await this.saveFilterDialog.waitFor({ state: 'hidden', timeout: 10000 });
   }
@@ -512,7 +500,7 @@ export class MarketplacePage extends BasePage {
   async getSavedFilterNames(): Promise<string[]> {
     await this.openFilters();
     await this.savedFilterDropdown.click();
-    await this.dropdownOption('None').waitFor({ state: 'visible', timeout: 10000 });
+    await this.getDropdownOption('None').waitFor({ state: 'visible', timeout: 10000 });
     // Page-wide options also include the Sort dropdown's two entries.
     const names = (await this.dropdownOptions.allInnerTexts())
       .map((t) => t.trim())
@@ -520,8 +508,6 @@ export class MarketplacePage extends BasePage {
     await this.page.keyboard.press('Escape');
     return names;
   }
-
-  // ==================== Deal card Actions ====================
 
   async getDealCardCount(): Promise<number> {
     return this.dealCardButtons.count();
@@ -532,7 +518,7 @@ export class MarketplacePage extends BasePage {
    * (live-verified QA 2026-10-21), while the map plots every match. Click it
    * until it is gone so card counts cover the whole result set.
    */
-  async loadAllCards() {
+  async loadAllCards(): Promise<void> {
     const loadMore = this.loadMoreButton;
     while (await loadMore.isVisible().catch(() => false)) {
       const before = await this.getDealCardCount();
@@ -546,13 +532,13 @@ export class MarketplacePage extends BasePage {
     return this.getDealCardCount();
   }
 
-  async openDealByIndex(index: number) {
+  async openDealByIndex(index: number): Promise<void> {
     await this.dealCardButtons.nth(index).waitFor({ state: 'visible', timeout: 30000 });
     await this.dealCardButtons.nth(index).click();
     await this.waitForStabilization(1500);
   }
 
-  async clickFirstItem() {
+  async clickFirstItem(): Promise<void> {
     const count = await this.getDealCardCount();
     if (count === 0) return;
     await this.openDealByIndex(0);
@@ -560,7 +546,7 @@ export class MarketplacePage extends BasePage {
 
   async getCardMpdId(index: number): Promise<string> {
     const text =
-      (await this.dealCard(index)
+      (await this.getDealCard(index)
         .textContent()
         .catch(() => '')) || '';
     return text.match(/MPD-\d+/)?.[0] ?? '';
@@ -574,7 +560,7 @@ export class MarketplacePage extends BasePage {
    */
   async getCardLocation(index: number): Promise<string> {
     return (
-      (await this.cardLocation(index)
+      (await this.getCardLocationElement(index)
         .textContent()
         .catch(() => '')) || ''
     ).trim();
@@ -590,7 +576,7 @@ export class MarketplacePage extends BasePage {
    */
   async getCardEstArv(index: number): Promise<string> {
     return (
-      (await this.cardLabelledValue(index, /Est\. ARV/)
+      (await this.getCardLabelledValue(index, /Est\. ARV/)
         .textContent()
         .catch(() => '')) || ''
     ).trim();
@@ -598,7 +584,7 @@ export class MarketplacePage extends BasePage {
 
   async getCardStage(index: number): Promise<string> {
     return (
-      (await this.cardLabelledValue(index, /^Stage:/)
+      (await this.getCardLabelledValue(index, /^Stage:/)
         .textContent()
         .catch(() => '')) || ''
     ).trim();
@@ -606,7 +592,7 @@ export class MarketplacePage extends BasePage {
 
   async getCardOppAge(index: number): Promise<string> {
     return (
-      (await this.cardLabelledValue(index, /Opp Age:/)
+      (await this.getCardLabelledValue(index, /Opp Age:/)
         .textContent()
         .catch(() => '')) || ''
     ).trim();
@@ -614,7 +600,7 @@ export class MarketplacePage extends BasePage {
 
   async getCardListingAge(index: number): Promise<string> {
     return (
-      (await this.cardLabelledValue(index, /Listing Age:/)
+      (await this.getCardLabelledValue(index, /Listing Age:/)
         .textContent()
         .catch(() => '')) || ''
     ).trim();
@@ -622,7 +608,7 @@ export class MarketplacePage extends BasePage {
 
   async getCardLastActivity(index: number): Promise<string> {
     return (
-      (await this.cardLabelledValue(index, /Last Activity:/)
+      (await this.getCardLabelledValue(index, /Last Activity:/)
         .textContent()
         .catch(() => '')) || ''
     ).trim();
@@ -656,7 +642,7 @@ export class MarketplacePage extends BasePage {
   }
 
   async getCardDealTypeBadge(index: number): Promise<string | null> {
-    const badge = this.cardDealTypeBadge(index);
+    const badge = this.getCardDealTypeBadgeElement(index);
     if (!(await badge.isVisible().catch(() => false))) return null;
     return (await badge.textContent()) ?? null;
   }
@@ -669,14 +655,17 @@ export class MarketplacePage extends BasePage {
   }
 
   /** Opens the card with this MPD id from the current listing; false if it isn't listed there. */
-  /** Each card's text (whitespace-collapsed) in list order — compared before/after Refresh to tell whether the list auto-refreshed. */
+  /**
+   * Each card's text (whitespace-collapsed) in list order — compared before/after Refresh to tell whether the list
+   * auto-refreshed.
+   */
   async getCardTexts(): Promise<string[]> {
     const count = await this.getDealCardCount();
     const texts: string[] = [];
     for (let i = 0; i < count; i++)
       texts.push(
         (
-          (await this.dealCard(i)
+          (await this.getDealCard(i)
             .innerText()
             .catch(() => '')) || ''
         )
@@ -703,8 +692,6 @@ export class MarketplacePage extends BasePage {
     return labels;
   }
 
-  // ==================== Map View Actions ====================
-
   async isMapVisible(): Promise<boolean> {
     return this.mapIframe.isVisible().catch(() => false);
   }
@@ -716,7 +703,7 @@ export class MarketplacePage extends BasePage {
    * Call this before reading marker count/labels right after switchView('Map')
    * to avoid racing the map's own async load.
    */
-  async waitForMapReady(timeout = 20000) {
+  async waitForMapReady(timeout = 20000): Promise<void> {
     await this.currentLocationMarker.waitFor({ state: 'visible', timeout });
     // The current-location pin renders immediately (no backend call needed);
     // deal markers come from a separate async fetch that finishes slightly
@@ -726,18 +713,22 @@ export class MarketplacePage extends BasePage {
   }
 
   async getMapMarkerCount(): Promise<number> {
-    return this.mapMarkers.count();
+    return (await this.getMapMarkerLabels()).length;
   }
 
   async isCurrentLocationMarkerVisible(): Promise<boolean> {
     return this.currentLocationMarker.isVisible().catch(() => false);
   }
 
+  /**
+   * One label per pin. Seen QA 2026-10-28: after filtering, the map can render a second copy of a pin
+   * (same "N Deals | ZIP" label, tabindex 0 instead of -1); a label names one ZIP, so repeats are dropped.
+   */
   async getMapMarkerLabels(): Promise<string[]> {
     const count = await this.mapMarkers.count();
     const labels: string[] = [];
     for (let i = 0; i < count; i++) labels.push((await this.mapMarkers.nth(i).getAttribute('aria-label')) ?? '');
-    return labels;
+    return [...new Set(labels)];
   }
 
   /**
@@ -823,9 +814,10 @@ export class MarketplacePage extends BasePage {
    * Playwright's actionability check for it rather than timing out on an
    * otherwise-genuinely-visible, in-viewport marker.
    */
-  async clickMapMarkerForZip(zip: string) {
+  async clickMapMarkerForZip(zip: string): Promise<void> {
     await this.closeFilters();
-    await this.mapMarkerForZip(zip).click({ force: true });
+    // .first(): the pin can be rendered twice (see getMapMarkerLabels).
+    await this.getMapMarkerForZip(zip).first().click({ force: true });
     await this.waitForStabilization(1500);
   }
 
@@ -846,10 +838,8 @@ export class MarketplacePage extends BasePage {
     return ids;
   }
 
-  // ==================== Assertions ====================
-
   /** Wait for the Marketplace listing to finish loading and log how many deals rendered. */
-  async expectMarketplaceLoaded() {
+  async expectMarketplaceLoaded(): Promise<void> {
     await this.waitForSpinner(25000);
     await this.searchInput.waitFor({ state: 'visible', timeout: 30000 }).catch(() => {});
     // The search input renders before the deal grid finishes its own async
@@ -864,7 +854,243 @@ export class MarketplacePage extends BasePage {
     Logger.info(`[Marketplace] ${count} deal card(s) visible`);
   }
 
-  async expectEmptyState(timeout = 15000) {
+  async expectEmptyState(timeout = 15000): Promise<void> {
     await expect(this.emptyStateText).toBeVisible({ timeout });
   }
+
+  /** The 5-digit zip in card `index`'s location ('' when it shows none). */
+  async getCardZip(index: number): Promise<string> {
+    return (await this.getCardLocation(index)).match(/\b\d{5}\b/)?.[0] ?? '';
+  }
+
+  /** Every card's Location | Stage | Listing Age, for checking a filter really narrowed every result. */
+  async getCardSummaries(): Promise<string[]> {
+    const count = await this.getDealCardCount();
+    const summaries: string[] = [];
+    for (let i = 0; i < count; i++) {
+      summaries.push(
+        [await this.getCardLocation(i), await this.getCardStage(i), await this.getCardListingAge(i)].join(' | '),
+      );
+    }
+    return summaries;
+  }
+
+  /** Last Activity / Opp Age / Listing Age as read from every card. */
+  async getCardDayFields(): Promise<Array<{ lastActivity: string; oppAge: string; listingAge: string }>> {
+    const count = await this.getDealCardCount();
+    const fields: Array<{ lastActivity: string; oppAge: string; listingAge: string }> = [];
+    for (let i = 0; i < count; i++) {
+      fields.push({
+        lastActivity: await this.getCardLastActivity(i),
+        oppAge: await this.getCardOppAge(i),
+        listingAge: await this.getCardListingAge(i),
+      });
+    }
+    return fields;
+  }
+
+  /** Card `index`'s value-bearing fields: Est. ARV, Last Activity, Opp Age, Listing Age. */
+  async getCardValueFields(index: number): Promise<string[]> {
+    return [
+      await this.getCardEstArv(index),
+      await this.getCardLastActivity(index),
+      await this.getCardOppAge(index),
+      await this.getCardListingAge(index),
+    ];
+  }
+
+  /** Card `index`'s core fields by name: MPD id, Est. ARV, Stage, Opp Age, Listing Age, Last Activity. */
+  async getCardCoreFields(index: number): Promise<Record<string, string>> {
+    return {
+      mpdId: await this.getCardMpdId(index),
+      estArv: await this.getCardEstArv(index),
+      stage: await this.getCardStage(index),
+      oppAge: await this.getCardOppAge(index),
+      listingAge: await this.getCardListingAge(index),
+      lastActivity: await this.getCardLastActivity(index),
+    };
+  }
+
+  /** The MPD ids of the first `max` cards. */
+  async getFirstCardMpdIds(max: number): Promise<string[]> {
+    return (await this.getAllCardMpdIds()).slice(0, max);
+  }
+
+  /**
+   * Returns the current list's card count; when the applied filters leave it empty, reloads the
+   * unfiltered list first and returns that count instead.
+   */
+  async showUnfilteredIfEmpty(): Promise<number> {
+    const filtered = await this.getDealCardCount();
+    if (filtered > 0) return filtered;
+    await this.navigate();
+    await this.expectMarketplaceLoaded();
+    return this.getDealCardCount();
+  }
+
+  /** Every card's MPD id, sorted — for comparing two views' contents regardless of order. */
+  async getSortedCardMpdIds(): Promise<string[]> {
+    return (await this.getAllCardMpdIds()).sort();
+  }
+
+  /**
+   * Which of the saved filters `names` have "Get notifications" ticked, sorted. Reads each through the
+   * Save Filter dialog (a Deal Type is picked first to enable Save Filter); the dialog is cancelled.
+   */
+  async getNotifiedSavedFilters(names: string[]): Promise<string[]> {
+    const notified: string[] = [];
+    await this.selectDealType('Assignment');
+    await this.openSaveFilterDialog();
+    for (const name of names) {
+      await this.selectSavedFilterToOverwrite(name);
+      if (await this.isSaveFilterNotifyChecked()) notified.push(name);
+    }
+    await this.cancelSaveFilterDialog();
+    return notified.sort();
+  }
+
+  /** True when saved filter `name` has "Get notifications" ticked (read via the Save Filter dialog, then cancelled). */
+  async isSavedFilterNotified(name: string): Promise<boolean> {
+    return (await this.getNotifiedSavedFilters([name])).length === 1;
+  }
+
+  /** Position of `mpdId`'s card in the list (-1 when it isn't listed). */
+  async getCardIndex(mpdId: string): Promise<number> {
+    return (await this.getAllCardMpdIds()).indexOf(mpdId);
+  }
+
+  /** True when `mpdId`'s card is on the list as it currently stands. */
+  async isCardListed(mpdId: string): Promise<boolean> {
+    return (await this.getAllCardMpdIds()).includes(mpdId);
+  }
+
+  /** `mpdId`'s card text as the list stands ('(not listed)' when absent). */
+  async getCardTextFor(mpdId: string): Promise<string> {
+    return (await this.getCardTexts()).find((t) => t.includes(mpdId)) ?? '(not listed)';
+  }
+
+  /** `mpdId`'s card text as the list stands, then again after the list's own Refresh button. */
+  async getCardBeforeAndAfterRefresh(mpdId: string): Promise<{ before: string; after: string }> {
+    const before = await this.getCardTextFor(mpdId);
+    await this.refresh();
+    await this.expectMarketplaceLoaded();
+    return { before, after: await this.getCardTextFor(mpdId) };
+  }
+
+  /** Navigates the list to `status` (filters reset first) without opening a deal. */
+  async showList(status: Exclude<DealStatus, 'Archived'>): Promise<void> {
+    await this.navigate();
+    await this.resetFilters();
+    await this.expectMarketplaceLoaded();
+    if (status !== 'Available') {
+      await this.selectDealStatus(status);
+      await this.applyFilters();
+      await this.expectMarketplaceLoaded();
+    }
+  }
+
+  /**
+   * The State filter's own options: getStateOptions() reads every role=option on the page, which also
+   * picks up the Sort dropdown's two options and the "All" entry.
+   */
+  async getStateFilterOptions(): Promise<string[]> {
+    return (await this.getStateOptions()).filter((o) => !o.startsWith('Sort:') && o !== 'All');
+  }
+
+  /** The Radius options that are distances ("10 miles", …), narrowest first. */
+  async getRadiusMileOptions(): Promise<string[]> {
+    return (await this.getRadiusOptions())
+      .filter((t) => /miles/i.test(t))
+      .sort((x, y) => radiusMiles(x) - radiusMiles(y));
+  }
+
+  /** Applies Radius `label`, confirms it is the applied radius and returns the resulting deal count. */
+  async applyRadiusAndCount(label: string): Promise<number> {
+    await this.selectRadius(label);
+    await this.waitForStabilization(1500);
+    await this.applyFilters();
+    await this.expectMarketplaceLoaded();
+    await expect(this.getMessageText(`Radius: ${radiusMiles(label)} miles`), `${label} is the applied radius`).toBeVisible();
+    const count = await this.getDealCardCount();
+    Logger.log(`Radius ${label} → ${count} deal(s)`);
+    return count;
+  }
+
+  /** Asserts the page is on the Marketplace route (/market-place/). */
+  async expectOnMarketplaceRoute(): Promise<void> {
+    await expect(this.page).toHaveURL((url) => url.pathname.includes(Routes.MARKETPLACE));
+  }
+
+  /** True when the Zip Code filter rejected `typed`: a zip error shows, or the value never made it into the field. */
+  async isZipRejected(typed: string): Promise<boolean> {
+    const value = await this.getZipCodeValue();
+    const error = await this.isMessageShown(/valid (5-digit )?zip|zip code (must|should)|only numeric|numbers only/i);
+    Logger.log(`"${typed}" → field "${value}", error shown = ${error}, ${await this.getDealCardCount()} deal(s)`);
+    return error || value !== typed;
+  }
+
+  /** Total deals across every map pin ("2 Deals | ZIP 30345" → 2) — what the grid's card count should equal. */
+  async getMapDealTotal(): Promise<number> {
+    return (await this.getMapMarkerLabels()).reduce((sum, label) => sum + markerDealCount(label), 0);
+  }
+
+  /** The deal count on `zip`'s map pin (0 when there is no such pin). */
+  async getMapMarkerDealCount(zip: string): Promise<number> {
+    const label = (await this.getMapMarkerLabels()).find((l) => l.includes(`ZIP ${zip}`));
+    return label ? markerDealCount(label) : 0;
+  }
+
+  /** True when a map pin is labelled with `zip`. */
+  async hasMapMarkerForZip(zip: string): Promise<boolean> {
+    return (await this.getMapMarkerLabels()).some((l) => l.includes(`ZIP ${zip}`));
+  }
+}
+
+/** USPS codes of the 50 states (DC is tolerated in the State filter but not required). */
+export const US_STATES = [
+  'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA', 'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY',
+  'LA', 'ME', 'MD', 'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ', 'NM', 'NY', 'NC', 'ND',
+  'OH', 'OK', 'OR', 'PA', 'RI', 'SC', 'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY',
+];
+
+/** State filter options that aren't a US state (DC allowed). */
+export function invalidStateOptions(options: string[]): string[] {
+  return options.filter((o) => !US_STATES.includes(o) && o !== 'DC');
+}
+
+/** US states missing from the State filter options. */
+export function missingStates(options: string[]): string[] {
+  return US_STATES.filter((st) => !options.includes(st));
+}
+
+/** Entries that appear more than once. */
+export function duplicateEntries(values: string[]): string[] {
+  return values.filter((v, i) => values.indexOf(v) !== i);
+}
+
+/** The miles in a Radius option ("25 miles" → 25). */
+export function radiusMiles(label: string): number {
+  return Number(label.match(/\d+/)?.[0] ?? 0);
+}
+
+/** The narrowest and widest of Radius options already sorted narrowest first. */
+export function narrowestAndWidest(options: string[]): { narrowest: string; widest: string } {
+  return { narrowest: options[0], widest: options[options.length - 1] };
+}
+
+/** The deal count on a map pin label ("2 Deals | ZIP 30345" → 2). */
+export function markerDealCount(label: string): number {
+  return Number(label.match(/^(\d+)/)?.[1] ?? 0);
+}
+
+/** Each card summary's Listing Age in days, skipping cards that show none. */
+export function listingAgesFrom(summaries: string[]): number[] {
+  return summaries
+    .map((c) => Number(c.match(/Listing Age:\s*(\d+)/)?.[1] ?? NaN))
+    .filter((n) => !Number.isNaN(n));
+}
+
+/** The first `max` card indexes of a list of `count` cards ([0, 1, …]). */
+export function firstCardIndexes(count: number, max: number): number[] {
+  return Array.from({ length: Math.min(count, max) }, (_, i) => i);
 }

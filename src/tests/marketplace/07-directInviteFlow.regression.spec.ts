@@ -1,11 +1,10 @@
-import { test, expect } from '../../fixtures/testFixtures';
-import type { Page } from '@playwright/test';
-import type { HomePage } from '../../modules/dashboard';
-import type { TestData } from '../../fixtures/testFixtures';
-import { envConfig } from '../../config/env.config';
-import { listWithDirectInvite, openDealAs, opportunityIdFrom, type DirectInviteDeal } from '../../utils/directInvite';
-import { SellerLeadPage } from '../../modules/seller';
-import { tileWindow } from '../../utils/windowLayout';
+import { test, expect } from '@fixtures/testFixtures';
+import { envConfig } from '@config/env.config';
+import { listFreshDeal, openDealAs } from '@utils/directInvite';
+import { tileWindow } from '@utils/windowLayout';
+import { Logger } from '@utils/logger';
+import { inviteeStatusPattern, labelledValuePattern } from '@modules/marketplace';
+import { alternateSubStage } from '@modules/seller';
 
 /**
  * Workflow suite for the Marketplace_Master sheet's workflow:
@@ -62,16 +61,6 @@ import { tileWindow } from '../../utils/windowLayout';
  * scope notes now live in 14-messagingToastsErrorsContextualCopy.regression.spec.ts.
  */
 
-async function resetToHome(authedPage: Page, authedHomePage: HomePage, data: TestData) {
-  await authedHomePage.navigate();
-  await authedPage.waitForLoadState('domcontentloaded');
-  await authedPage.waitForTimeout(data.timeouts.settle);
-}
-
-async function settleAfter(authedPage: Page, data: TestData) {
-  await authedPage.waitForTimeout(data.timeouts.afterEach);
-}
-
 test.describe('Direct Invite Flow @regression @MarketplaceDirectInviteFlow', () => {
   // =====================================================================
   // Direct Invite — Invited Franchise perspective (notifications proxy)
@@ -80,24 +69,22 @@ test.describe('Direct Invite Flow @regression @MarketplaceDirectInviteFlow', () 
   test(
     "Direct Invite notifications carry the deal's MPD id for the invited franchise @regression",
     { tag: '@INVITE-01' },
-    async ({ authedPage, data, authedHomePage, authedNotificationsPanelComponent }) => {
-      const items = await test.step('Open the notifications panel from Home', async () => {
-        await resetToHome(authedPage, authedHomePage, data);
+    async ({ authedHomePage, authedNotificationsPanelComponent }) => {
+      await test.step('Open the notifications panel from Home', async () => {
+        await authedHomePage.openAndSettle();
         await authedNotificationsPanelComponent.openNotifications();
-        return authedNotificationsPanelComponent.getNotificationItems();
+      });
+
+      const directInvites = await test.step('Collect the notifications that mention a Direct Invite', async () => {
+        return authedNotificationsPanelComponent.getNotificationItemsMatching(/direct invite/i);
       });
 
       await test.step('Verify every Direct Invite notification carries an MPD id', async () => {
-        const directInvites = items.filter((t) => /direct invite/i.test(t));
-        console.log(
-          `Direct Invite (invited perspective): ${directInvites.length} of ${items.length} notification(s) reference a direct invite`,
-        );
+        Logger.log(`Direct Invite (invited perspective): ${directInvites.length} notification(s) reference one`);
         for (const text of directInvites) {
           expect(text, 'Direct invite notification should reference an MPD id').toMatch(/MPD-\d+/);
         }
       });
-
-      await settleAfter(authedPage, data);
     },
   );
 
@@ -108,9 +95,9 @@ test.describe('Direct Invite Flow @regression @MarketplaceDirectInviteFlow', () 
   test(
     'Direct Invite deals are visible to the Listing Franchise via the Direct Deal Stage filter @regression',
     { tag: '@INVITE-02' },
-    async ({ authedPage, data, authedHomePage, authedMarketplacePage, authedMarketplaceDealPage }) => {
+    async ({ authedHomePage, authedMarketplacePage, authedMarketplaceDealPage }) => {
       const count = await test.step('Open the Marketplace filtered to My Listed Deals / Direct', async () => {
-        await resetToHome(authedPage, authedHomePage, data);
+        await authedHomePage.openAndSettle();
         await authedMarketplacePage.navigate();
         await authedMarketplacePage.expectMarketplaceLoaded();
         await authedMarketplacePage.selectDealStatus('My Listed Deals');
@@ -118,7 +105,7 @@ test.describe('Direct Invite Flow @regression @MarketplaceDirectInviteFlow', () 
         await authedMarketplacePage.applyFilters();
         await authedMarketplacePage.expectMarketplaceLoaded();
         const n = await authedMarketplacePage.getDealCardCount();
-        console.log(`Direct Invite (listing perspective): ${n} Direct-stage deal(s) listed by this franchise`);
+        Logger.log(`Direct Invite (listing perspective): ${n} Direct-stage deal(s) listed by this franchise`);
         return n;
       });
 
@@ -131,12 +118,10 @@ test.describe('Direct Invite Flow @regression @MarketplaceDirectInviteFlow', () 
 
       await test.step('Verify the deal shows its MPD id, then close it', async () => {
         const mpdId = await authedMarketplaceDealPage.getMpdId();
-        console.log(`Direct Invite (listing perspective): opened deal ${mpdId}`);
+        Logger.log(`Direct Invite (listing perspective): opened deal ${mpdId}`);
         expect(mpdId).toMatch(/MPD-\d+/);
         await authedMarketplaceDealPage.close();
       });
-
-      await settleAfter(authedPage, data);
     },
   );
 
@@ -148,16 +133,16 @@ test.describe('Direct Invite Flow @regression @MarketplaceDirectInviteFlow', () 
   test(
     'The deal record view (not just the card) indicates a Direct Invite @regression',
     { tag: '@INVITE-03' },
-    async ({ authedPage, data, authedHomePage, authedMarketplacePage, authedMarketplaceDealPage }) => {
+    async ({ authedHomePage, authedMarketplacePage, authedMarketplaceDealPage }) => {
       const count = await test.step('Open the Marketplace filtered to My Direct Invites', async () => {
-        await resetToHome(authedPage, authedHomePage, data);
+        await authedHomePage.openAndSettle();
         await authedMarketplacePage.navigate();
         await authedMarketplacePage.expectMarketplaceLoaded();
         await authedMarketplacePage.selectDealStatus('My Direct Invites');
         await authedMarketplacePage.applyFilters();
         await authedMarketplacePage.expectMarketplaceLoaded();
         const n = await authedMarketplacePage.getDealCardCount();
-        console.log(`${n} Direct Invite deal(s)`);
+        Logger.log(`${n} Direct Invite deal(s)`);
         return n;
       });
 
@@ -169,16 +154,11 @@ test.describe('Direct Invite Flow @regression @MarketplaceDirectInviteFlow', () 
       });
 
       await test.step('Verify the record view shows a Direct Invite indicator, then close it', async () => {
-        const present = await authedMarketplaceDealPage
-          .messageText(/invit/i)
-          .isVisible()
-          .catch(() => false);
-        console.log(`Direct Invite indicator visible in record view = ${present}`);
+        const present = await authedMarketplaceDealPage.isMessageShown(/invit/i);
+        Logger.log(`Direct Invite indicator visible in record view = ${present}`);
         expect(present).toBe(true);
         await authedMarketplaceDealPage.close();
       });
-
-      await settleAfter(authedPage, data);
     },
   );
 });
@@ -189,7 +169,8 @@ test.describe('Direct Invite Flow @regression @MarketplaceDirectInviteFlow', () 
 // tab of the same login, acting through the Bidding Franchise dropdown), which
 // declines or accepts. Franchise B never sees Franchise A's deals or invites
 // (QA 2026-10-26), so it only checks that isolation here. Flow live-verified
-// on QA 2026-10-06/07, re-checked with the other franchise 2026-10-26 (MPD-05535). Each test is ONE end-to-end journey —
+// on QA 2026-10-06/07, re-checked with the other franchise 2026-10-26 (MPD-05535). Each test is ONE end-to-end journey
+// —
 // create a brand-new seller op on Franchise A (New Seller Opportunity → New
 // Contact), list it with a Direct Invite, then act on it as the invited franchise —
 // with each sheet case as a test.step. Each deal is opened once per side and
@@ -218,7 +199,7 @@ test.describe('Direct Invite — two franchises side by side @regression @Market
     'Franchise A creates and lists an Assignment with a Direct Invite, the invited franchise declines it @regression @T1',
     { tag: '@INVITE-04' },
     async ({
-      otherFranchisePage,
+      
       authedHomePage,
       authedSellerLeadPage,
       authedMarketplacePage,
@@ -226,17 +207,16 @@ test.describe('Direct Invite — two franchises side by side @regression @Market
       otherFranchiseMarketplacePage,
       otherFranchiseMarketplaceDealPage,
       authedNotificationsPanelComponent,
-      franchiseBPage,
+      
       franchiseBMarketplacePage,
       franchiseBMarketplaceDealPage,
     }) => {
       const a = authedMarketplaceDealPage;
       const b = otherFranchiseMarketplaceDealPage;
-      let deal!: DirectInviteDeal;
 
       // Covers: DI_004
-      await test.step('Franchise A creates a new seller op from scratch and lists it as Assignment with a Direct Invite to the invited franchise', async () => {
-        const listed = await listWithDirectInvite(
+      const deal = await test.step('Franchise A creates a new seller op from scratch and lists it as Assignment with a Direct Invite to the invited franchise', async () => {
+        const listed = await listFreshDeal(
           authedHomePage,
           authedSellerLeadPage,
           authedMarketplacePage,
@@ -244,14 +224,13 @@ test.describe('Direct Invite — two franchises side by side @regression @Market
           'Assignment',
           INVITEE,
         );
-        expect(listed, 'Freshly created seller op must show "List in Marketplace"').not.toBeNull();
-        deal = listed!;
-        expect(deal.mpdId).toMatch(/^MPD-\d+$/);
+        expect(listed.mpdId).toMatch(/^MPD-\d+$/);
+        return listed;
       });
 
       // Covers: SD_011/SAN_046/MSG_023
       await test.step('On the same open deal, Franchise A sees Deal Stage Direct, "Pending Action from <invitee>" and Withdraw Deal', async () => {
-        expect((await a.getAdditionalFields())['Deal Stage']).toBe('Direct');
+        expect(await a.getDealStage()).toBe('Direct');
         const text = await a.getDealDialogText();
         expect(text).toContain('Assignment');
         expect(await a.hasCorpBadge(), 'Listing picked a corp deal (Lead Type "Corporate")').toBe(false);
@@ -262,14 +241,14 @@ test.describe('Direct Invite — two franchises side by side @regression @Market
 
       // Covers: DI_012
       await test.step('Franchise B, not invited, finds the deal under none of its Deal Status views', async () => {
-        await franchiseBPage.bringToFront();
+        await franchiseBMarketplacePage.bringToFront();
         for (const status of ['My Direct Invites', 'Available'] as const) {
           expect(
             await openDealAs(franchiseBMarketplacePage, franchiseBMarketplaceDealPage, deal.mpdId, status),
             `not under ${status} for Franchise B`,
           ).toBe(false);
         }
-        await otherFranchisePage.bringToFront();
+        await otherFranchiseMarketplacePage.bringToFront();
       });
 
       // Covers: SMK_015/RA_018/SAN_047
@@ -307,7 +286,7 @@ test.describe('Direct Invite — two franchises side by side @regression @Market
       // Covers: DI_006
       await test.step('Confirming Decline shows the toast, then the deal shows the declined message with no further actions', async () => {
         await b.confirmInvite('Decline');
-        await expect(b.messageText('The Marketplace Bid has been Declined')).toBeVisible();
+        await expect(b.getMessageText('The Marketplace Bid has been Declined')).toBeVisible();
         expect(await openDealAs(otherFranchiseMarketplacePage, b, deal.mpdId, 'My Direct Invites')).toBe(true);
         // The invitee's user has several qualified franchises; the declined message shows only for the invitee.
         await b.selectFranchiseIfPresent(INVITEE);
@@ -326,7 +305,7 @@ test.describe('Direct Invite — two franchises side by side @regression @Market
           await openDealAs(authedMarketplacePage, a, deal.mpdId, 'My Listed Deals', envConfig.FRANCHISE_A_NAME),
         ).toBe(true);
         const text = await a.getDealDialogText();
-        expect(text).toMatch(new RegExp(`Direct Invite ${INVITEE}.*Declined`));
+        expect(text).toMatch(inviteeStatusPattern(INVITEE, 'Declined'));
         // Sheet expectations not met on QA 2026-10-06/07: no "<Franchise> have
         // Declined this Marketplace Deal.", Actions still "Pending Action from
         // <invitee>", Deal Stage still "Direct". Soft so the journey finishes.
@@ -335,23 +314,23 @@ test.describe('Direct Invite — two franchises side by side @regression @Market
           .toContain(`${INVITEE} have Declined this Marketplace Deal.`);
         expect.soft(text, 'Stale "Pending Action" after decline').not.toContain(`Pending Action from ${INVITEE}`);
         expect
-          .soft((await a.getAdditionalFields())['Deal Stage'], 'Stage after decline (Direct → Ad Council)')
+          .soft(await a.getDealStage(), 'Stage after decline (Direct → Ad Council)')
           .toBe('Ad Council');
         await a.close();
       });
 
       // Covers: DI_019
       await test.step('The declined invite cannot be accepted later from My Direct Invites, Available or My Bids', async () => {
-        await otherFranchisePage.bringToFront();
+        await otherFranchiseMarketplacePage.bringToFront();
         for (const status of ['My Direct Invites', 'Available', 'My Bids'] as const) {
           if (!(await openDealAs(otherFranchiseMarketplacePage, b, deal.mpdId, status))) {
-            console.log(`  [DirectInvite] declined ${deal.mpdId} not listed under ${status}`);
+            Logger.log(`  [DirectInvite] declined ${deal.mpdId} not listed under ${status}`);
             continue;
           }
           await b.selectFranchiseIfPresent(INVITEE);
           expect(await b.hasInviteActions(), `no Accept/Decline Invite under ${status}`).toBe(false);
           // Product to confirm whether a normal bid is allowed once the deal reaches Ad Council.
-          console.log(
+          Logger.log(
             `  [DirectInvite] declined ${deal.mpdId} under ${status}: Place Bid offered = ${await b.isEligibleToBid()}`,
           );
           await b.close();
@@ -362,11 +341,10 @@ test.describe('Direct Invite — two franchises side by side @regression @Market
       await test.step('Franchise A gets a web notification that the invited franchise declined the invite', async () => {
         await authedHomePage.navigate();
         await authedNotificationsPanelComponent.openNotifications();
-        const items = (await authedNotificationsPanelComponent.getNotificationItems()).join('\n');
+        const items = await authedNotificationsPanelComponent.getNotificationsText();
         // Not seen on QA 2026-10-06 (Direct Invite Findings F07); product to confirm.
-        expect
-          .soft(items, 'declined-invite notification to the Listing Franchise')
-          .toMatch(new RegExp(`${deal.mpdId}[\\s\\S]*declined|declined[\\s\\S]*${deal.mpdId}`, 'i'));
+        expect.soft(items, 'declined-invite notification names the deal').toContain(deal.mpdId);
+        expect.soft(items, 'declined-invite notification to the Listing Franchise').toMatch(/declined/i);
       });
     },
   );
@@ -376,7 +354,7 @@ test.describe('Direct Invite — two franchises side by side @regression @Market
     'Franchise A creates and lists an Opportunity with a Direct Invite, the invited franchise accepts it and takes over the same record @regression',
     { tag: '@INVITE-05' },
     async ({
-      otherFranchisePage,
+      
       authedHomePage,
       authedSellerLeadPage,
       authedMarketplacePage,
@@ -384,16 +362,16 @@ test.describe('Direct Invite — two franchises side by side @regression @Market
       otherFranchiseHomePage,
       otherFranchiseMarketplacePage,
       otherFranchiseMarketplaceDealPage,
+      otherFranchiseSellerLeadPage,
       authedNotificationsPanelComponent,
       otherFranchiseNotificationsPanelComponent,
     }) => {
       const a = authedMarketplaceDealPage;
       const b = otherFranchiseMarketplaceDealPage;
-      let deal!: DirectInviteDeal;
 
       // Covers: DI_007, DI_025
-      await test.step('Franchise A creates a new seller op from scratch, logs a call on it, and lists it as Opportunity with a Direct Invite to the invited franchise', async () => {
-        const listed = await listWithDirectInvite(
+      const deal = await test.step('Franchise A creates a new seller op from scratch, logs a call on it, and lists it as Opportunity with a Direct Invite to the invited franchise', async () => {
+        const listed = await listFreshDeal(
           authedHomePage,
           authedSellerLeadPage,
           authedMarketplacePage,
@@ -404,14 +382,13 @@ test.describe('Direct Invite — two franchises side by side @regression @Market
             beforeList: () => authedSellerLeadPage.clickLogACall(''), // Subject is a lookup; the default "Call" is kept
           },
         );
-        expect(listed, 'Freshly created seller op must show "List in Marketplace"').not.toBeNull();
-        deal = listed!;
-        expect(deal.mpdId).toMatch(/^MPD-\d+$/);
+        expect(listed.mpdId).toMatch(/^MPD-\d+$/);
         // Covers: LF_020 — listing franchise's view (still open on My Listed Deals)
         const listedText = await a.getDealDialogText();
-        expect(listedText, 'Franchise A sees the Deal Terms verbatim').toContain(deal.dealTerms);
-        expect(listedText, 'Franchise A sees the Opportunity Details verbatim').toContain(deal.oppDetails);
+        expect(listedText, 'Franchise A sees the Deal Terms verbatim').toContain(listed.dealTerms);
+        expect(listedText, 'Franchise A sees the Opportunity Details verbatim').toContain(listed.oppDetails);
         await a.close();
+        return listed;
       });
 
       // Covers: DI_002, SD_015, SAN_048
@@ -422,10 +399,10 @@ test.describe('Direct Invite — two franchises side by side @regression @Market
         expect(invitedText, 'the invited franchise sees the Deal Terms verbatim').toContain(deal.dealTerms);
         expect(invitedText, 'the invited franchise sees the Opportunity Details verbatim').toContain(deal.oppDetails);
         await b.selectFranchiseIfPresent(INVITEE);
-        const popup = (await b.openInviteConfirmation('Accept')).replace(/\s+/g, ' ');
+        const popup = await b.openInviteConfirmationText('Accept');
         expect(popup).toContain('Confirmation of Invite Acceptance');
         expect(popup).toContain('Are you sure you want to accept this invite?');
-        expect(popup).toMatch(new RegExp(`Deal Terms\\s*${deal.dealTerms}`));
+        expect(popup).toMatch(labelledValuePattern('Deal Terms', deal.dealTerms));
         expect(popup).toMatch(/Reason for Bid\s*Direct Invite/);
         expect(popup).toContain(
           'I have authority to bind my Franchisee and agree to The UGVille Marketplace - Terms & Conditions.',
@@ -441,9 +418,8 @@ test.describe('Direct Invite — two franchises side by side @regression @Market
           .toBe(false);
         await b.confirmInvite('Accept');
         expect(await openDealAs(otherFranchiseMarketplacePage, b, deal.mpdId, 'My Bids')).toBe(true);
-        const fields = await b.getAdditionalFields();
-        expect(fields['Deal Stage']).toBe('Bid Accepted');
-        expect(fields['Opp Transferred']).toMatch(/^\d{2}\/\d{2}\/\d{4}$/);
+        expect(await b.getDealStage()).toBe('Bid Accepted');
+        expect(await b.getAdditionalField('Opp Transferred')).toMatch(/^\d{2}\/\d{2}\/\d{4}$/);
         const text = await b.getDealDialogText();
         expect(text).toContain('This Marketplace deal has already been won.');
         expect(text).toContain(`The winning franchise for this deal is: ${INVITEE}.`);
@@ -451,7 +427,7 @@ test.describe('Direct Invite — two franchises side by side @regression @Market
 
       // Covers: DI_018
       await test.step('On the same open deal, the invited franchise links to the SAME opportunity record, not a copy', async () => {
-        expect(opportunityIdFrom(await b.getSourceOpportunityHref())).toBe(deal.oppId);
+        expect(await b.getSourceOpportunityId()).toBe(deal.oppId);
         await b.close();
       });
 
@@ -472,9 +448,8 @@ test.describe('Direct Invite — two franchises side by side @regression @Market
         expect(
           await openDealAs(authedMarketplacePage, a, deal.mpdId, 'My Listed Deals', envConfig.FRANCHISE_A_NAME),
         ).toBe(true);
-        const fields = await a.getAdditionalFields();
-        expect(fields['Deal Stage']).toBe('Bid Accepted');
-        expect(fields['Opp Transferred']).toMatch(/^\d{2}\/\d{2}\/\d{4}$/);
+        expect(await a.getDealStage()).toBe('Bid Accepted');
+        expect(await a.getAdditionalField('Opp Transferred')).toMatch(/^\d{2}\/\d{2}\/\d{4}$/);
         expect(await a.getDealDialogText()).toContain(`The winning franchise for this deal is: ${INVITEE}.`);
         expect(await a.hasWithdrawDealOption()).toBe(false);
         expect(await a.getSourceOpportunityHref(), 'Listing Franchise must lose the opportunity link').toBe('');
@@ -483,24 +458,25 @@ test.describe('Direct Invite — two franchises side by side @regression @Market
 
       // Covers: DI_018
       await test.step('The opportunity record itself now belongs to the invited franchise', async () => {
-        const record = new SellerLeadPage(otherFranchisePage);
-        await record.navigateById(deal.oppId);
-        expect(await record.getAccountName()).toBe(INVITEE);
-        expect(await record.getOpportunityOwner()).not.toBe('');
+        await otherFranchiseSellerLeadPage.navigateById(deal.oppId);
+        expect(await otherFranchiseSellerLeadPage.getAccountName()).toBe(INVITEE);
+        expect(await otherFranchiseSellerLeadPage.getOpportunityOwner()).not.toBe('');
       });
 
       // Covers: DI_025
       await test.step('The call Franchise A logged before listing is on the record the invited franchise now owns', async () => {
-        const record = new SellerLeadPage(otherFranchisePage);
-        await record.navigateById(deal.oppId);
-        expect(await record.hasLoggedCallInTimeline(), 'logged call carried over in the Timeline').toBe(true);
+        await otherFranchiseSellerLeadPage.navigateById(deal.oppId);
+        expect(
+          await otherFranchiseSellerLeadPage.hasLoggedCallInTimeline(),
+          'logged call carried over in the Timeline',
+        ).toBe(true);
       });
 
       // Covers: DI_011
       await test.step('Both franchises get the accept web notifications', async () => {
         await otherFranchiseHomePage.navigate();
         await otherFranchiseNotificationsPanelComponent.openNotifications();
-        const bItems = (await otherFranchiseNotificationsPanelComponent.getNotificationItems()).join('\n');
+        const bItems = await otherFranchiseNotificationsPanelComponent.getNotificationsText();
         // QA 2026-10-26 (MPD-05535): no "You have a direct invite for this deal" notification when
         // the invited franchise belongs to the inviting user — only the accept notifications arrive.
         expect(bItems).not.toContain(`You have a direct invite for this deal ${deal.mpdId}`);
@@ -508,8 +484,13 @@ test.describe('Direct Invite — two franchises side by side @regression @Market
 
         await authedHomePage.navigate();
         await authedNotificationsPanelComponent.openNotifications();
-        const aItems = (await authedNotificationsPanelComponent.getNotificationItems()).join('\n');
-        expect(aItems).toMatch(new RegExp(`${deal.mpdId} .*has been accepted by ${INVITEE}`));
+        expect(
+          await authedNotificationsPanelComponent.hasNotificationContainingAll(
+            `${deal.mpdId} `,
+            `has been accepted by ${INVITEE}`,
+          ),
+          'Franchise A is notified the invitee accepted',
+        ).toBe(true);
       });
     },
   );
@@ -519,8 +500,8 @@ test.describe('Direct Invite — two franchises side by side @regression @Market
     'Franchise A withdraws a pending Direct Invite while the invited franchise has it open @regression',
     { tag: '@INVITE-06' },
     async ({
-      authedPage,
-      otherFranchisePage,
+      
+      
       authedHomePage,
       authedSellerLeadPage,
       authedMarketplacePage,
@@ -530,10 +511,10 @@ test.describe('Direct Invite — two franchises side by side @regression @Market
     }) => {
       const a = authedMarketplaceDealPage;
       const b = otherFranchiseMarketplaceDealPage;
-      let deal!: DirectInviteDeal;
 
-      await test.step('Franchise A lists a new seller op as Assignment with a Direct Invite to the invited franchise, which opens it (window kept open)', async () => {
-        const listed = await listWithDirectInvite(
+
+      const deal = await test.step('Franchise A lists a new seller op as Assignment with a Direct Invite to the invited franchise, which opens it (window kept open)', async () => {
+        const listed = await listFreshDeal(
           authedHomePage,
           authedSellerLeadPage,
           authedMarketplacePage,
@@ -541,24 +522,23 @@ test.describe('Direct Invite — two franchises side by side @regression @Market
           'Assignment',
           INVITEE,
         );
-        expect(listed, 'Freshly created seller op must show "List in Marketplace"').not.toBeNull();
-        deal = listed!;
-        await otherFranchisePage.bringToFront();
-        expect(await openDealAs(otherFranchiseMarketplacePage, b, deal.mpdId, 'My Direct Invites')).toBe(true);
+        await otherFranchiseMarketplacePage.bringToFront();
+        expect(await openDealAs(otherFranchiseMarketplacePage, b, listed.mpdId, 'My Direct Invites')).toBe(true);
         await b.selectFranchiseIfPresent(INVITEE);
         expect(await b.hasInviteActions()).toBe(true);
         // Covers: DI_014 — B gets as far as the ticked Accept confirmation, then waits.
         await b.openInviteConfirmation('Accept');
         await b.tickTermsOfUse();
+        return listed;
       });
 
       // Covers: SD_012
       await test.step('With the invite still pending, Franchise A withdraws the deal — "Deal Withdrawn Successfully"', async () => {
-        await authedPage.bringToFront();
+        await authedMarketplacePage.bringToFront();
         expect(await a.hasWithdrawDealOption()).toBe(true);
         await a.withdrawDeal();
         const toast = await a.waitForToastText();
-        console.log(`  [DirectInvite] Withdraw Deal toast: "${toast}"`);
+        Logger.log(`  [DirectInvite] Withdraw Deal toast: "${toast}"`);
         expect(toast).toContain('Deal Withdrawn Successfully');
         expect(
           await openDealAs(authedMarketplacePage, a, deal.mpdId, 'My Listed Deals'),
@@ -568,11 +548,11 @@ test.describe('Direct Invite — two franchises side by side @regression @Market
 
       // Covers: DI_014
       await test.step('Confirming the Accept that was left open is refused: the invited franchise does not win the withdrawn deal', async () => {
-        await otherFranchisePage.bringToFront();
+        await otherFranchiseMarketplacePage.bringToFront();
         const toast = b.waitForToastText(40000);
         await b.confirmInvite('Accept').catch(() => {}); // a refused confirm can leave the popup open
         const text = await toast;
-        console.log(`  [DirectInvite] Accept after withdraw: "${text}"`);
+        Logger.log(`  [DirectInvite] Accept after withdraw: "${text}"`);
         // Seen QA 2026-10-11: the late Accept returns "The Marketplace Bid has been Accepted" on the withdrawn deal.
         expect.soft(text, 'the late Accept is refused with an error').toMatch(/^Error/);
         await b.cancelInviteConfirmation().catch(() => {});
@@ -589,7 +569,7 @@ test.describe('Direct Invite — two franchises side by side @regression @Market
 
       // Covers: DI_013
       await test.step('The invited franchise, reopening its invites, can no longer Accept/Decline the withdrawn deal', async () => {
-        await otherFranchisePage.bringToFront();
+        await otherFranchiseMarketplacePage.bringToFront();
         const stillListed = await openDealAs(otherFranchiseMarketplacePage, b, deal.mpdId, 'My Direct Invites');
         if (stillListed) {
           await b.selectFranchiseIfPresent(INVITEE);
@@ -616,23 +596,22 @@ test.describe('Direct Invite — two franchises side by side @regression @Market
     'Franchise A creates and lists an Assignment with a Direct Invite, the invited franchise accepts it and both keep their own opportunity @regression',
     { tag: '@INVITE-07' },
     async ({
-      authedPage,
-      otherFranchisePage,
+      
+      
       authedHomePage,
       authedSellerLeadPage,
       authedMarketplacePage,
       authedMarketplaceDealPage,
       otherFranchiseMarketplacePage,
       otherFranchiseMarketplaceDealPage,
+      otherFranchiseSellerLeadPage,
     }) => {
       const a = authedMarketplaceDealPage;
       const b = otherFranchiseMarketplaceDealPage;
-      let deal!: DirectInviteDeal;
-      let copyId = '';
 
       // Covers: DI_021
-      await test.step('Franchise A creates a new seller op from scratch and lists it as Assignment with a Direct Invite to the invited franchise', async () => {
-        const listed = await listWithDirectInvite(
+      const deal = await test.step('Franchise A creates a new seller op from scratch and lists it as Assignment with a Direct Invite to the invited franchise', async () => {
+        const listed = await listFreshDeal(
           authedHomePage,
           authedSellerLeadPage,
           authedMarketplacePage,
@@ -640,9 +619,8 @@ test.describe('Direct Invite — two franchises side by side @regression @Market
           'Assignment',
           INVITEE,
         );
-        expect(listed, 'Freshly created seller op must show "List in Marketplace"').not.toBeNull();
-        deal = listed!;
         await a.close();
+        return listed;
       });
 
       // Covers: DI_021
@@ -652,15 +630,16 @@ test.describe('Direct Invite — two franchises side by side @regression @Market
         await b.openInviteConfirmation('Accept');
         await b.confirmInvite('Accept');
         expect(await openDealAs(otherFranchiseMarketplacePage, b, deal.mpdId, 'My Bids')).toBe(true);
-        expect((await b.getAdditionalFields())['Deal Stage']).toBe('Bid Accepted');
+        expect(await b.getDealStage()).toBe('Bid Accepted');
       });
 
       // Covers: DI_017
-      await test.step('On the same open deal, the invited franchise links to its own copy, not the original', async () => {
-        copyId = opportunityIdFrom(await b.getSourceOpportunityHref());
+      const copyId = await test.step('On the same open deal, the invited franchise links to its own copy, not the original', async () => {
+        const id = await b.getSourceOpportunityId();
         await b.close();
-        expect(copyId, 'Invited Franchise must link to an opportunity').not.toBe('');
-        expect(copyId, 'Invited Franchise must get a separate copy, not the original').not.toBe(deal.oppId);
+        expect(id, 'Invited Franchise must link to an opportunity').not.toBe('');
+        expect(id, 'Invited Franchise must get a separate copy, not the original').not.toBe(deal.oppId);
+        return id;
       });
 
       // Covers: DI_017
@@ -668,38 +647,40 @@ test.describe('Direct Invite — two franchises side by side @regression @Market
         expect(
           await openDealAs(authedMarketplacePage, a, deal.mpdId, 'My Listed Deals', envConfig.FRANCHISE_A_NAME),
         ).toBe(true);
-        expect(opportunityIdFrom(await a.getSourceOpportunityHref()), 'Listing Franchise keeps its original').toBe(
-          deal.oppId,
-        );
+        expect(await a.getSourceOpportunityId(), 'Listing Franchise keeps its original').toBe(deal.oppId);
         await a.close();
       });
 
       // Covers: DI_017
       await test.step('The original stays with Franchise A and the copy belongs to the invited franchise', async () => {
-        const original = new SellerLeadPage(authedPage);
-        await original.navigateById(deal.oppId);
-        expect(await original.getAccountName(), 'Original stays with the Listing Franchise').toBe(deal.listingAccount);
-        const copy = new SellerLeadPage(otherFranchisePage);
-        await copy.navigateById(copyId);
-        expect(await copy.getAccountName(), 'Copy belongs to the Invited Franchise').toBe(INVITEE);
+        await authedSellerLeadPage.navigateById(deal.oppId);
+        expect(await authedSellerLeadPage.getAccountName(), 'Original stays with the Listing Franchise').toBe(
+          deal.listingAccount,
+        );
+        await otherFranchiseSellerLeadPage.navigateById(copyId);
+        expect(await otherFranchiseSellerLeadPage.getAccountName(), 'Copy belongs to the Invited Franchise').toBe(INVITEE);
       });
 
       // Covers: DI_026
-      await test.step("The invited franchise changes the Sub Stage on its copy; Franchise A's original keeps its own Sub Stage", async () => {
-        const original = new SellerLeadPage(authedPage);
-        await original.navigateById(deal.oppId);
-        const originalSubStage = await original.getDetailField('Sub Stage');
-        const copy = new SellerLeadPage(otherFranchisePage);
-        await copy.navigateById(copyId);
-        const target =
-          originalSubStage === 'Contacted, No Appointment Set'
-            ? 'Attempting To Contact'
-            : 'Contacted, No Appointment Set';
-        await copy.setSubStage(target);
-        await copy.navigateById(copyId);
-        expect(await copy.getDetailField('Sub Stage'), 'copy saved the new Sub Stage').toBe(target);
-        await original.navigateById(deal.oppId);
-        expect(await original.getDetailField('Sub Stage'), 'original is unchanged').toBe(originalSubStage);
+      const { originalSubStage, target } =
+        await test.step("Read the Sub Stage on Franchise A's original and pick a different one", async () => {
+          await authedSellerLeadPage.navigateById(deal.oppId);
+          const current = await authedSellerLeadPage.getDetailField('Sub Stage');
+          return { originalSubStage: current, target: alternateSubStage(current) };
+        });
+
+      await test.step(`The invited franchise changes the Sub Stage on its copy to "${target}"`, async () => {
+        await otherFranchiseSellerLeadPage.navigateById(copyId);
+        await otherFranchiseSellerLeadPage.setSubStage(target);
+        await otherFranchiseSellerLeadPage.navigateById(copyId);
+        expect(await otherFranchiseSellerLeadPage.getDetailField('Sub Stage'), 'copy saved the new Sub Stage').toBe(
+          target,
+        );
+      });
+
+      await test.step("Verify Franchise A's original keeps its own Sub Stage", async () => {
+        await authedSellerLeadPage.navigateById(deal.oppId);
+        expect(await authedSellerLeadPage.getDetailField('Sub Stage'), 'original is unchanged').toBe(originalSubStage);
       });
     },
   );

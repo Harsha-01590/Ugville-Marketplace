@@ -2,6 +2,7 @@ import type { Reporter, TestCase, TestResult, FullResult, Suite } from '@playwri
 import * as ExcelJS from 'exceljs';
 import * as path from 'path';
 import * as fs from 'fs';
+import { Logger } from '@utils/logger';
 
 interface Row {
   file: string;
@@ -26,9 +27,9 @@ export default class ExcelReporter implements Reporter {
     this.outputFile = path.isAbsolute(fileName) ? fileName : path.join(dir, fileName);
   }
 
-  private timestamp() {
+  private timestamp(): string {
     const d = new Date();
-    const pad = (n: number) => String(n).padStart(2, '0');
+    const pad = (n: number): string => String(n).padStart(2, '0');
     return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
   }
 
@@ -46,7 +47,7 @@ export default class ExcelReporter implements Reporter {
     return parts.filter(Boolean).join(' > ');
   }
 
-  onTestEnd(test: TestCase, result: TestResult) {
+  onTestEnd(test: TestCase, result: TestResult): void {
     const errorMsg = result.errors
       // eslint-disable-next-line no-control-regex -- strips ANSI colour codes from Playwright error messages
       .map((e) => (e.message || '').replace(/\u001b\[[0-9;]*m/g, ''))
@@ -65,7 +66,7 @@ export default class ExcelReporter implements Reporter {
     });
   }
 
-  async onEnd(result: FullResult) {
+  async onEnd(result: FullResult): Promise<void> {
     // Rows arrive in the order tests *finish*, not the order they're
     // declared - retries, worker scheduling, and file discovery order
     // can all reorder that. Sort explicitly by file path then source
@@ -159,6 +160,6 @@ export default class ExcelReporter implements Reporter {
 
     await workbook.xlsx.writeFile(this.outputFile);
 
-    console.log(`\n[ExcelReporter] Results written to: ${this.outputFile}\n`);
+    Logger.log(`\n[ExcelReporter] Results written to: ${this.outputFile}\n`);
   }
 }

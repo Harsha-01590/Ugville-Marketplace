@@ -1,10 +1,14 @@
 // @ts-check
 import js from '@eslint/js';
+import { defineConfig } from 'eslint/config';
 import tseslint from 'typescript-eslint';
 import playwright from 'eslint-plugin-playwright';
-import prettier from 'eslint-config-prettier';
+import stylistic from '@stylistic/eslint-plugin';
 
-export default tseslint.config(
+// Formatting is enforced by @stylistic below — it replaces Prettier, so no
+// Prettier config or eslint-config-prettier runs alongside it.
+
+export default defineConfig(
   {
     ignores: [
       'node_modules/**',
@@ -23,21 +27,44 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
+    // Formatting (Prettier replacement) — applies to every linted file
+    plugins: { '@stylistic': stylistic },
+    rules: {
+      '@stylistic/indent': ['error', 2, { SwitchCase: 1 }],
+      '@stylistic/quotes': ['error', 'single', { avoidEscape: true }],
+      '@stylistic/semi': ['error', 'always'],
+      '@stylistic/max-len': [
+        'error',
+        { code: 120, ignoreUrls: true, ignoreStrings: true, ignoreTemplateLiterals: true, ignoreRegExpLiterals: true },
+      ],
+      '@stylistic/comma-dangle': ['error', 'always-multiline'],
+      '@stylistic/arrow-parens': ['error', 'always'],
+    },
+  },
+  {
     files: ['src/**/*.ts', 'playwright.config.ts'],
     rules: {
-      // Code standards
+      // General
       eqeqeq: ['error', 'always'],
       'no-var': 'error',
       'prefer-const': 'error',
-      'no-console': ['warn', { allow: ['warn', 'error', 'log'] }],
+      'no-console': 'error',
+      // TypeScript strictness
+      '@typescript-eslint/no-explicit-any': 'error',
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
-      '@typescript-eslint/no-explicit-any': 'warn',
+      '@typescript-eslint/explicit-function-return-type': ['error', { allowExpressions: true }],
+      '@typescript-eslint/no-non-null-assertion': 'error',
       '@typescript-eslint/consistent-type-definitions': ['error', 'interface'],
       '@typescript-eslint/consistent-type-imports': [
         'error',
         { prefer: 'type-imports', fixStyle: 'inline-type-imports' },
       ],
     },
+  },
+  {
+    // The one sanctioned console sink — everything else logs through Logger
+    files: ['src/utils/logger.ts'],
+    rules: { 'no-console': 'off' },
   },
   {
     // Playwright specs: enforce test.step structure and no flaky patterns
@@ -61,5 +88,4 @@ export default tseslint.config(
       'playwright/max-nested-describe': ['error', { max: 2 }],
     },
   },
-  prettier,
 );

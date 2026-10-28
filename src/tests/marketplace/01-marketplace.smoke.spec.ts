@@ -1,5 +1,6 @@
-import { test, expect } from '../../fixtures/testFixtures';
-import { Routes } from '../../enums/routes.enum';
+import { test, expect } from '@fixtures/testFixtures';
+import { Routes } from '@enums/routes.enum';
+import { openFirstDealWhere } from '@utils/dealScan';
 
 /**
  * Marketplace Smoke Suite — maps to the Marketplace_Master spreadsheet's
@@ -30,7 +31,7 @@ test.describe('Marketplace Smoke @smoke', () => {
   test(
     'Marketplace is reachable from Home and loads at /market-place/ @smoke',
     { tag: '@SMOKE-01' },
-    async ({ authedPage, authedHomePage, authedMarketplacePage }) => {
+    async ({ authedHomePage, authedMarketplacePage }) => {
       await test.step('Open the Marketplace from Home', async () => {
         await authedHomePage.navigate();
         await authedMarketplacePage.navigate();
@@ -38,7 +39,7 @@ test.describe('Marketplace Smoke @smoke', () => {
       });
 
       await test.step('Verify the Marketplace route is loaded', async () => {
-        expect(authedPage.url()).toContain(Routes.MARKETPLACE);
+        expect(authedMarketplacePage.getCurrentUrl()).toContain(Routes.MARKETPLACE);
       });
     },
   );
@@ -116,20 +117,16 @@ test.describe('Marketplace Smoke @smoke', () => {
       // or the other, so scan for a deal that actually shows the "already bid"
       // message rather than assuming the first card is it.
       const found = await test.step('Find a deal that shows the "already bid" message', async () => {
-        for (let i = 0; i < count; i++) {
-          await authedMarketplacePage.openDealByIndex(i);
-          await authedMarketplaceDealPage.expectLoaded();
-          const alreadyBid = await authedMarketplaceDealPage.hasAlreadyBidMessage();
-          await authedMarketplaceDealPage.close();
-          if (alreadyBid) return true;
-        }
-        return false;
+        return openFirstDealWhere(authedMarketplacePage, authedMarketplaceDealPage, count, (deal) =>
+          deal.hasAlreadyBidMessage(),
+        );
       });
 
       test.skip(!found, 'No already-bid deal found under My Bids/In Review — only pending Direct Invites present');
 
-      await test.step('Verify an In Review bid was found', async () => {
-        expect(found).toBe(true);
+      await test.step('Verify the open deal shows the "already bid" message, then close it', async () => {
+        expect(await authedMarketplaceDealPage.hasAlreadyBidMessage()).toBe(true);
+        await authedMarketplaceDealPage.close();
       });
     },
   );
@@ -155,20 +152,16 @@ test.describe('Marketplace Smoke @smoke', () => {
       // Same Direct-Invite-vs-genuine-bid caveat as SMK_009 above — scan
       // instead of trusting index 0.
       const found = await test.step('Find a deal that offers Withdraw Bid', async () => {
-        for (let i = 0; i < count; i++) {
-          await authedMarketplacePage.openDealByIndex(i);
-          await authedMarketplaceDealPage.expectLoaded();
-          const withdrawable = await authedMarketplaceDealPage.hasWithdrawBidOption();
-          await authedMarketplaceDealPage.close();
-          if (withdrawable) return true;
-        }
-        return false;
+        return openFirstDealWhere(authedMarketplacePage, authedMarketplaceDealPage, count, (deal) =>
+          deal.hasWithdrawBidOption(),
+        );
       });
 
       test.skip(!found, 'No withdrawable In Review bid found — only pending Direct Invites present');
 
-      await test.step('Verify Withdraw Bid is offered', async () => {
-        expect(found).toBe(true);
+      await test.step('Verify Withdraw Bid is offered on the open deal, then close it', async () => {
+        expect(await authedMarketplaceDealPage.hasWithdrawBidOption()).toBe(true);
+        await authedMarketplaceDealPage.close();
       });
     },
   );
